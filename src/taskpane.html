@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MacTrace</title>
+    <link rel="stylesheet" href="taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="formula-parser.js"></script>
+    <script src="excel.js"></script>
+    <script src="taskpane.js" defer></script>
+  </head>
+  <body>
+    <!-- Shown until Office is ready / when the host is unsupported -->
+    <div id="mt-boot" class="mt-boot">Loading MacTrace…</div>
+
+    <div id="mt-app" hidden>
+      <header class="mt-header">
+        <div class="mt-cellline">
+          <span id="mt-addr" class="mt-addr">—</span>
+          <span id="mt-value" class="mt-value"></span>
+          <span id="mt-sheet" class="mt-sheet"></span>
+        </div>
+        <div id="mt-formula" class="mt-formula" aria-label="Active cell formula"></div>
+      </header>
+
+      <nav class="mt-tabs" role="tablist">
+        <button id="mt-tab-prec" class="mt-tab mt-tab--active" role="tab">Precedents</button>
+        <button id="mt-tab-dep" class="mt-tab" role="tab">Dependents</button>
+      </nav>
+
+      <div class="mt-colhead" id="mt-colhead">
+        <span>Element</span><span>Role</span><span>Value</span><span>Location</span>
+      </div>
+
+      <main id="mt-content" class="mt-content" tabindex="0"></main>
+
+      <footer class="mt-footer">
+        <div id="mt-status" class="mt-status"></div>
+        <div class="mt-hint">↑↓ move · → / ← expand/collapse · Enter go · Esc exit · Backspace back</div>
+      </footer>
+    </div>
+  </body>
+</html>

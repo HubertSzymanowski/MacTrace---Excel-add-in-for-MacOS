@@ -1,0 +1,153 @@
+/* MacTrace task pane — compact, keyboard-first, low-chrome. */
+
+:root {
+  --mt-accent: #217346;        /* Excel green */
+  --mt-accent-weak: #e6f2ec;
+  --mt-text: #1f1f1f;
+  --mt-muted: #6b6b6b;
+  --mt-line: #e3e3e3;
+  --mt-row-hover: #f3f7f4;
+  --mt-cursor: #cfe6da;
+  --mt-ref: #2b579a;           /* reference blue */
+  --mt-fn: #7a3e9d;            /* function purple */
+  --mt-num: #1f7a4d;
+  --mt-str: #a3431b;
+  --mt-bg: #ffffff;
+  --mt-grid: 1.6fr 0.9fr 1fr 1.1fr;
+  font-size: 13px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: var(--mt-text);
+  background: var(--mt-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#mt-app { display: flex; flex-direction: column; height: 100vh; }
+
+.mt-boot { padding: 24px; color: var(--mt-muted); }
+
+/* ---- Header --------------------------------------------------------------- */
+.mt-header {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--mt-line);
+  background: var(--mt-accent-weak);
+}
+.mt-cellline { display: flex; align-items: baseline; gap: 8px; }
+.mt-addr { font-weight: 700; font-size: 14px; color: var(--mt-accent); }
+.mt-value { font-weight: 600; }
+.mt-sheet { margin-left: auto; color: var(--mt-muted); font-size: 11px; }
+.mt-formula {
+  margin-top: 4px;
+  font-family: "SF Mono", "Menlo", "Consolas", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  max-height: 84px;
+  overflow: auto;
+}
+.mt-formula:hover { background: rgba(0, 0, 0, 0.03); cursor: text; border-radius: 4px; }
+/* Editing happens in place: the same line turns into a contentEditable field with
+   a subtle outline — no separate box. */
+.mt-formula--editing {
+  outline: 2px solid var(--mt-accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+  background: #fff;
+  cursor: text;
+  white-space: pre-wrap;
+}
+.mt-formula .tok-ref { color: var(--mt-ref); cursor: pointer; border-bottom: 1px dotted var(--mt-ref); }
+.mt-formula .tok-ref:hover { background: #dde7f5; }
+.mt-formula .tok-fn { color: var(--mt-fn); font-weight: 600; }
+.mt-formula .tok-num { color: var(--mt-num); }
+.mt-formula .tok-str { color: var(--mt-str); }
+.mt-formula .tok-op, .mt-formula .tok-punct { color: var(--mt-muted); }
+.mt-formula .tok-active {
+  background: #fff3b0;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #e6c200 inset;
+}
+
+/* ---- Tabs / toolbar ------------------------------------------------------- */
+.mt-tabs {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--mt-line);
+}
+.mt-tab {
+  border: none; background: transparent; cursor: pointer;
+  padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  color: var(--mt-muted);
+}
+.mt-tab--active { background: var(--mt-accent); color: #fff; }
+
+/* ---- Column header + rows ------------------------------------------------- */
+.mt-colhead, .mt-row {
+  display: grid;
+  grid-template-columns: var(--mt-grid);
+  align-items: center;
+  gap: 6px;
+}
+.mt-colhead {
+  padding: 4px 10px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--mt-muted);
+  border-bottom: 1px solid var(--mt-line);
+}
+.mt-content { flex: 1; overflow: auto; outline: none; }
+
+.mt-row {
+  padding: 3px 10px 3px 0;
+  cursor: default;
+  border-bottom: 1px solid #f4f4f4;
+}
+.mt-row:hover { background: var(--mt-row-hover); }
+.mt-row.mt-cursor { background: var(--mt-cursor); }
+.mt-row.mt-nav { cursor: pointer; }
+
+.mt-el {
+  display: flex; align-items: center; gap: 4px;
+  padding-left: calc(8px + var(--depth, 0) * 14px);
+  font-family: "SF Mono", "Menlo", "Consolas", monospace;
+  font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mt-row.mt-nav .mt-el-text { color: var(--mt-ref); }
+.mt-row.mt-func .mt-el-text { color: var(--mt-fn); font-weight: 600; }
+.mt-twisty {
+  display: inline-block; width: 12px; text-align: center;
+  color: var(--mt-muted); cursor: pointer; user-select: none;
+  transition: transform 0.1s ease;
+}
+.mt-twisty.mt-open { transform: rotate(90deg); }
+.mt-twisty.mt-leaf { visibility: hidden; }
+
+.mt-info { color: var(--mt-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-val { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mt-val.v-number { color: var(--mt-num); }
+.mt-val.v-string { color: var(--mt-str); }
+.mt-val.v-error  { color: #c0392b; font-weight: 600; }
+.mt-val.v-external, .mt-val.v-missing, .mt-val.v-invalid { color: var(--mt-muted); font-style: italic; }
+.mt-loc { font-size: 11px; color: var(--mt-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mt-children.mt-collapsed { display: none; }
+
+.mt-note { padding: 12px; color: var(--mt-muted); font-size: 12px; }
+.mt-deprow { /* dependents use the same .mt-row grid */ }
+
+/* ---- Footer --------------------------------------------------------------- */
+.mt-footer {
+  border-top: 1px solid var(--mt-line);
+  padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.mt-status { font-size: 11px; color: var(--mt-muted); min-height: 14px; }
+.mt-status.mt-err { color: #c0392b; }
+.mt-hint { font-size: 10px; color: #9a9a9a; }

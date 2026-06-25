@@ -1,0 +1,31 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/office-js/extended-manifest.schema.json",
+  "actions": [
+    {
+      "id": "TracePrecedents",
+      "type": "ExecuteFunction",
+      "name": "MacTrace: trace precedents"
+    },
+    {
+      "id": "TraceDependents",
+      "type": "ExecuteFunction",
+      "name": "MacTrace: trace dependents"
+    }
+  ],
+  "shortcuts": [
+    {
+      "action": "TracePrecedents",
+      "key": {
+        "default": "Ctrl+Alt+A",
+        "mac": "Command+Alt+A"
+      }
+    },
+    {
+      "action": "TraceDependents",
+      "key": {
+        "default": "Ctrl+Alt+Shift+A",
+        "mac": "Command+Alt+Shift+A"
+      }
+    }
+  ]
+}

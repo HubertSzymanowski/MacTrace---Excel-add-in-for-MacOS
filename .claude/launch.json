@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mactrace-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["preview/serve.js"],
+      "port": 4123
+    }
+  ]
+}

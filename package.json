@@ -1,0 +1,20 @@
+{
+  "name": "mactrace",
+  "version": "1.0.0",
+  "description": "Fast, keyboard-driven formula tracing add-in for Excel on Mac (an Arixcel-inspired auditor).",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "icons": "node scripts/make-icons.js",
+    "certs": "office-addin-dev-certs install",
+    "sideload": "node scripts/sideload.js",
+    "unsideload": "node scripts/sideload.js --remove",
+    "autostart": "bash scripts/install-autostart.sh",
+    "autostart:off": "bash scripts/uninstall-autostart.sh",
+    "validate": "office-addin-manifest validate manifest.xml"
+  },
+  "devDependencies": {
+    "office-addin-dev-certs": "^1.13.0",
+    "office-addin-manifest": "^1.13.0"
+  }
+}

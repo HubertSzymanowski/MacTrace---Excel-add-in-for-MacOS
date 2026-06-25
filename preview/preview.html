@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MacTrace — preview (mock Excel)</title>
+    <link rel="stylesheet" href="../src/taskpane.css" />
+    <style>
+      /* Frame the pane like Excel's side panel so the preview reads clearly. */
+      body { background: #d8d8d8; }
+      #frame { width: 360px; height: 640px; margin: 16px auto; background: #fff;
+        box-shadow: 0 6px 24px rgba(0,0,0,0.2); border-radius: 6px; overflow: hidden; }
+      #frame #mt-app { height: 640px; }
+    </style>
+  </head>
+  <body>
+    <div id="frame">
+      <div id="mt-boot" class="mt-boot">Loading MacTrace…</div>
+      <div id="mt-app" hidden>
+        <header class="mt-header">
+          <div class="mt-cellline">
+            <span id="mt-addr" class="mt-addr">—</span>
+            <span id="mt-value" class="mt-value"></span>
+            <span id="mt-sheet" class="mt-sheet"></span>
+          </div>
+          <div id="mt-formula" class="mt-formula"></div>
+        </header>
+        <nav class="mt-tabs" role="tablist">
+          <button id="mt-tab-prec" class="mt-tab mt-tab--active" role="tab">Precedents</button>
+          <button id="mt-tab-dep" class="mt-tab" role="tab">Dependents</button>
+        </nav>
+        <div class="mt-colhead" id="mt-colhead">
+          <span>Element</span><span>Role</span><span>Value</span><span>Location</span>
+        </div>
+        <main id="mt-content" class="mt-content" tabindex="0"></main>
+        <footer class="mt-footer">
+          <div id="mt-status" class="mt-status"></div>
+          <div class="mt-hint">↑↓ move · → / ← expand/collapse · Enter go · Esc start · Backspace back</div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- ---- Mocks: stand in for office.js + the Excel layer ------------------ -->
+    <script>
+      window.Office = {
+        HostType: { Excel: "Excel" },
+        onReady: function (cb) { if (cb) cb({ host: "Excel" }); }
+      };
+      // Minimal Excel.run so the pane's selection subscription works.
+      window.Excel = {
+        run: function (cb) {
+          var ctx = {
+            workbook: { onSelectionChanged: { add: function (h) { window.__fireSel = function () { h(); }; } } },
+            sync: function () { return Promise.resolve(); }
+          };
+          return Promise.resolve(cb(ctx));
+        }
+      };
+      // A tiny fake model resembling the Arixcel screenshot.
+      window.MacTraceExcel = {
+        BUILD: "hl-v12",
+        CAPS: { dependents: function () { return true; } },
+        _addr: "Calcs!J510",
+        _values: {
+          "AD$3": { kind: "cell", display: "2026", valueType: "Double", address: "Calcs!AD3" },
+          "$G$518": { kind: "cell", display: "-20", valueType: "Double", address: "Calcs!G518" },
+          "AD510": { kind: "cell", display: "11,984.44", valueType: "Double", address: "Calcs!AD510" }
+        },
+        getSelection: function () {
+          var a = this._addr, local = a.split("!").pop();
+          if (a === "Calcs!J510") {
+            return Promise.resolve({
+              address: a, local: "J510", sheet: "Calcs",
+              formula: "=IF(AD$3>$G$518,OFFSET(AD510,,-$G$518),0)",
+              isFormula: true, text: "5,146.59", valueType: "Double",
+              selection: a, selectionLocal: "J510", selectionCount: 1
+            });
+          }
+          return Promise.resolve({
+            address: a, local: local, sheet: "Calcs", formula: "=AD510*2",
+            isFormula: true, text: "23,968.88", valueType: "Double",
+            selection: a, selectionLocal: local, selectionCount: 1
+          });
+        },
+        resolveRefs: function (refs) {
+          var self = this, o = {};
+          refs.forEach(function (r) {
+            o[r] = self._values[r] || { kind: "cell", display: "0", valueType: "Double", address: "Calcs!" + r.replace(/\$/g, "") };
+          });
+          return Promise.resolve(o);
+        },
+        navigateTo: function (addr) {
+          this._addr = addr;
+          setTimeout(function () { if (window.__fireSel) window.__fireSel(); }, 10);
+          return Promise.resolve({ ok: true });
+        },
+        getDirectDependents: function () {
+          return Promise.resolve({ supported: true, items: [
+            { address: "Calcs!K510", local: "K510" },
+            { address: "Summary!B12", local: "Summary!B12" }
+          ] });
+        },
+        HL_COLOR: "#27E7F5",
+        _highlighted: null,
+        applyTemporaryHighlight: function (addr) { this._highlighted = addr; return Promise.resolve({ ok: true, scrolled: true }); },
+        clearTemporaryHighlight: function () { this._highlighted = null; return Promise.resolve({ ok: true, cleared: true }); },
+        _gridFocused: false,
+        returnFocusToGrid: function () { this._gridFocused = true; return Promise.resolve({ ok: true }); },
+        _written: null,
+        setFormula: function (addr, formula) { this._written = { addr: addr, formula: formula }; return Promise.resolve({ ok: true }); }
+      };
+    </script>
+    <script src="../src/formula-parser.js"></script>
+    <script src="../src/taskpane.js"></script>
+  </body>
+</html>
