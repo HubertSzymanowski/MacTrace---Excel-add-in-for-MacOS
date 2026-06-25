@@ -13,7 +13,7 @@
   // Build tag — bumped on every change to this layer so the pane can show which
   // code is actually running (shared-runtime JS only reloads on a full Excel
   // restart, so a stale build is a real possibility to rule out).
-  var BUILD = "hl-v13";
+  var BUILD = "grid-v15";
 
   // ---- Capability detection -------------------------------------------------
 
@@ -484,20 +484,6 @@
       });
   }
 
-  // Hand keyboard control back to the worksheet. Re-selecting the active cell
-  // forces the Excel host to pull focus out of the task pane and onto the grid —
-  // the only reliable way to "exit" the pane via the keyboard on Mac.
-  function returnFocusToGrid() {
-    return Excel.run(function (ctx) {
-      ctx.workbook.getActiveCell().select();
-      return ctx.sync();
-    }).then(function () {
-      return { ok: true };
-    }).catch(function (e) {
-      return { ok: false, message: e && e.message ? e.message : String(e) };
-    });
-  }
-
   // Write a new formula (or literal value) back into a single cell, then sync so
   // Excel recalculates. Uses the same robust sheet resolution as everything else.
   function setFormula(refText, formula) {
@@ -536,7 +522,6 @@
     getDirectDependents: getDirectDependents,
     applyTemporaryHighlight: applyTemporaryHighlight,
     clearTemporaryHighlight: clearTemporaryHighlight,
-    returnFocusToGrid: returnFocusToGrid,
     setFormula: setFormula
   };
 })(window);

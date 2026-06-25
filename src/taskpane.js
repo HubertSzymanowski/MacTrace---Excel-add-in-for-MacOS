@@ -50,7 +50,7 @@
     // Excel — that the latest pane code actually loaded (shared-runtime JS only
     // reloads on a full Excel restart).
     var hint = document.querySelector(".mt-hint");
-    if (hint) hint.textContent = "build " + (X.BUILD || "?") + " · ↑↓ move · → / ← expand · Enter go · Esc exit";
+    if (hint) hint.textContent = "build " + (X.BUILD || "?") + " · ↑↓ move · → / ← expand · Enter go · Esc close";
     document.getElementById("mt-boot").hidden = true;
     document.getElementById("mt-app").hidden = false;
     subscribeSelection();
@@ -103,6 +103,7 @@
   function activateTrace(mode, event) {
     var wasVisible = state.visible;
     state.visible = true;
+    setStatus(""); // clear any stale status (e.g. "Closing MacTrace…" from a prior Esc)
     applyMode(mode);
     refresh();
     focusPane();
@@ -339,7 +340,9 @@
       e.preventDefault();
       e.stopPropagation();
       finishEdit(false); // discard the edit, restore the coloured display
-      exitToGrid();       // Esc always ends with keyboard control on the grid
+      if (dom["mt-content"]) dom["mt-content"].focus(); // back to the tree; pane stays open
+      // Note: Esc here only cancels the in-place edit. Press Esc again (not
+      // editing) to close the pane.
     }
     // all other keys (typing, arrows, Backspace) edit the formula text
   }
@@ -663,10 +666,9 @@
       case "Escape":
         // Diagnostic: confirms the webview actually captured the Esc keystroke.
         try { console.log("Escape fired"); } catch (_) {}
-        // Deliberately DO NOT preventDefault: on Excel for Mac, the host's own
-        // Escape handling is one of the few things that can move keyboard focus
-        // out of a task pane, so we let it run alongside our cleanup.
-        exitToGrid();
+        // Esc closes the pane entirely (host-level hide). We don't preventDefault
+        // so the host's native Escape can run alongside our cleanup.
+        closePane();
         break;
       case "Backspace": e.preventDefault(); goBack(); break;
       default: break;
@@ -733,33 +735,26 @@
     queueHL(function () { return X.clearTemporaryHighlight(); });
   }
 
-  // Esc: bail out of the inspection flow. Restore any temporary highlight, then
-  // hand keyboard control back to the worksheet (selecting the active cell pulls
-  // focus off the pane and onto the grid). We do NOT refocus the pane — the whole
-  // point is to give the grid control.
-  //
-  // Runs DIRECTLY rather than through queueHL: Esc is a terminal action and must
-  // never be left waiting behind a slow/blocked highlight task. The status line is
-  // updated synchronously first, so even if the focus transfer is silently blocked
-  // by the host we still get visible proof the handler fired, plus any error text.
-  function exitToGrid() {
-    setStatus("Esc — returning control to the grid…");
+  // Esc — close the pane entirely. Hiding is a host-level operation through the
+  // shared-runtime visibility API; when the pane disappears the grid is the only
+  // surface left, so keyboard focus lands there by default. This sidesteps the
+  // webview->grid focus transfer that Excel-for-Mac otherwise blocks (the reason
+  // the old "return focus to grid on Esc" never worked). Drop the highlight
+  // first; hide() runs regardless of whether that cleanup succeeds.
+  function closePane() {
+    setStatus("Closing MacTrace…");
     clearTimeout(inspectTimer);
     state.suppressUntil = Date.now() + 500; // ignore the self-caused selection event
-    X.clearTemporaryHighlight()
-      .then(function () { return X.returnFocusToGrid(); }) // (re)select the active cell
-      .then(function (res) {
-        // The cell is now selected, but Excel-for-Mac keeps keyboard focus in the
-        // webview unless we actively give it up. Blur the focused element AND the
-        // pane window so the OS hands keyboard control to the (already-selected)
-        // grid. Repeat once after a tick — the host sometimes needs a beat.
+    return X.clearTemporaryHighlight().catch(function () {})
+      .then(function () {
+        var addin = Office.addin;
+        if (addin && typeof addin.hide === "function") return addin.hide();
+        // No shared-runtime hide() (unsupported host): best-effort blur so focus
+        // at least leaves the webview.
         blurWebview();
-        setTimeout(blurWebview, 60);
-        if (res && res.ok) setStatus("Returned to the grid.");
-        else setStatus("Esc: couldn't move focus" + (res && res.message ? " — " + res.message : ""), true);
       })
       .catch(function (e) {
-        setStatus("Esc error: " + (e && e.message ? e.message : e), true);
+        setStatus("Esc: couldn't close the pane" + (e && e.message ? " — " + e.message : ""), true);
       });
   }
 

@@ -35,7 +35,7 @@
         <main id="mt-content" class="mt-content" tabindex="0"></main>
         <footer class="mt-footer">
           <div id="mt-status" class="mt-status"></div>
-          <div class="mt-hint">↑↓ move · → / ← expand/collapse · Enter go · Esc start · Backspace back</div>
+          <div class="mt-hint">↑↓ move · → / ← expand/collapse · Enter go · Backspace back · Esc close</div>
         </footer>
       </div>
     </div>
@@ -83,7 +83,7 @@
       };
       // A tiny fake model resembling the Arixcel screenshot.
       window.MacTraceExcel = {
-        BUILD: "hl-v13",
+        BUILD: "grid-v15",
         CAPS: { dependents: function () { return true; } },
         _addr: "Calcs!J510",
         _values: {
@@ -129,8 +129,6 @@
         _highlighted: null,
         applyTemporaryHighlight: function (addr) { this._highlighted = addr; return Promise.resolve({ ok: true, scrolled: true }); },
         clearTemporaryHighlight: function () { this._highlighted = null; return Promise.resolve({ ok: true, cleared: true }); },
-        _gridFocused: false,
-        returnFocusToGrid: function () { this._gridFocused = true; return Promise.resolve({ ok: true }); },
         _written: null,
         setFormula: function (addr, formula) { this._written = { addr: addr, formula: formula }; return Promise.resolve({ ok: true }); }
       };

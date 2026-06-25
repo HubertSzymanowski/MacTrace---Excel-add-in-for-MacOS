@@ -16,8 +16,8 @@ It does two things, well and quickly:
    `#REF!` errors. Click any dependent to drill further.
 
 Navigate entirely from the keyboard: `Backspace` steps back one hop as you drill,
-and `Esc` bails out of the pane entirely, handing keyboard control back to the
-worksheet.
+and `Esc` closes the pane, which returns keyboard control to the worksheet.
+Reopen it any time with **Cmd+Option+A** (or the **Trace** button).
 
 ---
 
@@ -89,7 +89,15 @@ selection automatically — click any cell and its formula breaks down instantly
 | Expand / collapse a node | `→` / `←` |
 | Commit / drill into the selected reference | `Enter`, or click the row |
 | Step back one hop | `Backspace` |
-| Exit the pane and hand control back to the grid | `Esc` |
+| Close the pane (returns control to the grid) | `Esc` |
+
+**About `Esc`:** pressing `Esc` *closes* the pane rather than just moving focus.
+On Excel for Mac, a task pane can't reliably hand keyboard focus back to the grid
+while staying open, so MacTrace hides the pane instead — once it's gone, Excel
+returns control to the worksheet and you can keep typing right away. Reopen with
+**Cmd+Option+A** (or the **Trace** button) and your selection is re-traced
+instantly. (While editing a formula in place, `Esc` only cancels that edit and
+leaves the pane open.)
 
 **Live preview + grid highlight:** as you move `↑`/`↓` over a referenced cell,
 MacTrace scrolls to it, **paints it `#27E7F5` in the grid**, and highlights the

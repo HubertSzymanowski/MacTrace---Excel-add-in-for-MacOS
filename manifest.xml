@@ -121,7 +121,7 @@
         <bt:String id="Dependents.Label" DefaultValue="Dependents" />
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="Precedents.Tooltip" DefaultValue="Open MacTrace on the active cell's precedents (Cmd+Option+A). Arrow keys navigate, Enter drills, Esc snaps back." />
+        <bt:String id="Precedents.Tooltip" DefaultValue="Open MacTrace on the active cell's precedents (Cmd+Option+A). Arrow keys navigate, Enter drills, Esc closes the pane." />
         <bt:String id="Dependents.Tooltip" DefaultValue="Open MacTrace on the active cell's dependents (Cmd+Option+Shift+A)." />
       </bt:LongStrings>
     </Resources>
