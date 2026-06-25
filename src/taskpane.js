@@ -88,17 +88,32 @@
     });
   }
 
-  // Invoked by a ribbon command or keyboard shortcut: show the pane, switch to
-  // the requested mode, retrace the active cell, and grab keyboard focus so the
-  // arrow keys work immediately.
+  // Invoked by a ribbon command or keyboard shortcut: switch to the requested
+  // mode, retrace the active cell, ensure the pane is visible, and grab keyboard
+  // focus so the arrow keys work immediately.
+  //
+  // The retrace (applyMode + refresh) runs FIRST and unconditionally — it must
+  // never be gated behind the show/hide sequence below. The old code ran it only
+  // inside the .then() of addin.hide().then(() => addin.showAsTaskpane()), with a
+  // silent .catch(function(){}) around the whole thing: when the pane was already
+  // open and that hide-then-show sequence rejected (flaky on Mac), the retrace
+  // simply never happened — the ribbon button "did nothing" while the pane stayed
+  // open on the OLD mode. Now the trace always updates; only the extra focus-grab
+  // dance is allowed to fail quietly.
   function activateTrace(mode, event) {
+    var wasVisible = state.visible;
+    state.visible = true;
+    applyMode(mode);
+    refresh();
+    focusPane();
+
     var addin = Office.addin;
     var seq;
     if (addin && typeof addin.showAsTaskpane === "function") {
-      // If the pane is already open, a plain showAsTaskpane() leaves keyboard
+      // If the pane was already open, a plain showAsTaskpane() leaves keyboard
       // focus on the grid. Hide then re-show to force the SAME hidden->shown
-      // transition that grabs focus on first open.
-      if (state.visible && typeof addin.hide === "function") {
+      // transition that grabs focus on first open. This is now best-effort only.
+      if (wasVisible && typeof addin.hide === "function") {
         seq = addin.hide().then(function () { return addin.showAsTaskpane(); });
       } else {
         seq = addin.showAsTaskpane();
@@ -106,14 +121,11 @@
     } else {
       seq = Promise.resolve();
     }
-    Promise.resolve(seq).then(function () {
-      state.visible = true;
-      applyMode(mode);
-      refresh();
-      focusPane();
-    }).catch(function () {}).then(function () {
-      if (event && event.completed) event.completed();
-    });
+    Promise.resolve(seq)
+      .then(focusPane, focusPane) // succeed or fail, take one more shot at focus
+      .then(function () {
+        if (event && event.completed) event.completed();
+      });
   }
 
   // Best-effort: pull keyboard focus into the pane so arrows/Enter/Esc work

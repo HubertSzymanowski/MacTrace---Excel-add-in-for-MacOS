@@ -42,9 +42,34 @@
 
     <!-- ---- Mocks: stand in for office.js + the Excel layer ------------------ -->
     <script>
+      // Mock of the shared-runtime command/visibility APIs so the ribbon-button /
+      // shortcut retrace path (activateTrace) can be exercised exactly as it runs
+      // in real Excel — including the failure mode where hide() rejects while the
+      // pane is already open. Toggle via window.__failHide.
+      window.__actions = {};
+      window.__visCb = null;
+      window.__paneVisible = true;
+      window.__failHide = false;
       window.Office = {
         HostType: { Excel: "Excel" },
-        onReady: function (cb) { if (cb) cb({ host: "Excel" }); }
+        onReady: function (cb) { if (cb) cb({ host: "Excel" }); },
+        actions: {
+          associate: function (name, handler) { window.__actions[name] = handler; }
+        },
+        addin: {
+          showAsTaskpane: function () {
+            window.__paneVisible = true;
+            if (window.__visCb) window.__visCb({ visibilityMode: "Taskpane" });
+            return Promise.resolve();
+          },
+          hide: function () {
+            if (window.__failHide) return Promise.reject(new Error("mock hide() rejection"));
+            window.__paneVisible = false;
+            if (window.__visCb) window.__visCb({ visibilityMode: "Hidden" });
+            return Promise.resolve();
+          },
+          onVisibilityModeChanged: function (cb) { window.__visCb = cb; }
+        }
       };
       // Minimal Excel.run so the pane's selection subscription works.
       window.Excel = {
@@ -58,7 +83,7 @@
       };
       // A tiny fake model resembling the Arixcel screenshot.
       window.MacTraceExcel = {
-        BUILD: "hl-v12",
+        BUILD: "hl-v13",
         CAPS: { dependents: function () { return true; } },
         _addr: "Calcs!J510",
         _values: {
