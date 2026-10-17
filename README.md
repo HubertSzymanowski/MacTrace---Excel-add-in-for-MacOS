@@ -152,8 +152,10 @@ reinstall.
 
 ## Use it
 
-Open the pane with **Trace**, or with the shortcuts below. It tracks your
-selection automatically — click any cell and its formula breaks down instantly.
+Select a cell and open the pane with **Trace**, or with the shortcuts below.
+MacTrace traces **only when you ask**: clicking around the grid or previewing
+references never changes what the pane shows. To audit another cell, select it
+and press **Cmd+Option+A** again, or drill into it from the tree.
 
 | Action | How |
 | --- | --- |
@@ -187,6 +189,8 @@ auditing; click any blue reference in the formula line to jump straight to it.
 **Edit a formula in place:** click anywhere on the formula line (other than a blue
 reference) to turn it into an editable field. Type your changes and press `Enter`
 (or click away) to write the new formula back to the cell; press `Esc` to cancel.
+If the cell was changed in the grid since you traced it, MacTrace won't overwrite
+it: it shows the cell's current formula instead, so you can redo the edit on it.
 
 > Note: highlighting physically changes the cell fill (the Excel JS API has no
 > overlay layer), so hovering will mark the workbook as modified even though the

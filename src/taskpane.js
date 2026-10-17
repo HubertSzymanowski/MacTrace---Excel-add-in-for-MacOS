@@ -1,9 +1,10 @@
 /*
  * MacTrace — task pane controller
  * -------------------------------
- * Owns the UI: tracks the Excel selection, renders the precedents tree or the
- * dependents list, drives keyboard navigation, and manages the "rubber band"
- * (snap back to where you started auditing).
+ * Owns the UI: renders the precedents tree or the dependents list for the
+ * audited cell, and drives keyboard navigation, live preview and drilling. A
+ * cell is traced only when you ask (ribbon button, shortcut, first open) or
+ * drill / step back, never because Excel's selection moved. See trace().
  */
 (function () {
   "use strict";
@@ -13,14 +14,11 @@
 
   var state = {
     mode: "precedents", // "precedents" | "dependents"
-    selection: null, // last getSelection() result
-    origin: null, // { address } — rubber-band start cell
-    navStack: [], // visited addresses, for Back
+    selection: null, // the audited target (shape of X.getSelection / X.getTargetInfo)
+    navStack: [], // previously audited targets { address, selection }, for Back
     cursor: 0, // index into the currently focusable rows
     busy: false,
-    pending: false,
-    programmatic: false, // true while WE drive the selection (drilling), not the user
-    suppressUntil: 0, // ignore selection-changed events we caused (preview/teleport)
+    pending: null, // trace request queued while busy (see trace())
     visible: true // is the pane actually shown? (shared runtime loads it hidden)
   };
 
@@ -34,6 +32,7 @@
   // Formula-editor state: whether the in-pane formula field is open for editing,
   // and the value it held when editing began (to detect a real change on commit).
   var editing = false;
+  var writing = false; // an in-place formula write (and its re-render) is in flight
   var formulaOriginal = "";
 
   // ---- Boot -----------------------------------------------------------------
@@ -50,15 +49,15 @@
     // Excel — that the latest pane code actually loaded (shared-runtime JS only
     // reloads on a full Excel restart).
     var hint = document.querySelector(".mt-hint");
-    if (hint) hint.textContent = "build " + (X.BUILD || "?") + " · ↑↓ move · → / ← expand · Enter go · Esc close";
+    if (hint) hint.textContent = "build " + (X.BUILD || "?") + " · ⌘⌥A trace · ↑↓ move · → / ← expand · Enter go · Esc close";
     document.getElementById("mt-boot").hidden = true;
     document.getElementById("mt-app").hidden = false;
-    subscribeSelection();
+    watchSelection();
     setupCommands(); // ribbon/keyboard handlers + visibility tracking
     // Recovery: undo any highlight left painted by a previous session that closed
     // or crashed before it could clean up (state survives in document settings).
     X.clearTemporaryHighlight();
-    if (state.visible) { refresh(); focusPane(); }
+    if (state.visible) { trace("active"); focusPane(); }
   });
 
   // Register the shared-runtime command handlers (used by the ribbon buttons and
@@ -73,8 +72,13 @@
       Office.addin.onVisibilityModeChanged(function (args) {
         var shown = args && String(args.visibilityMode) === "Taskpane";
         state.visible = shown;
-        if (shown) { refresh(); focusPane(); }
-        else clearInspect(); // pane hidden — drop the highlight
+        if (shown) {
+          // Being shown is not a request to retrace: the ribbon button / shortcut
+          // (activateTrace) has already traced the active cell. Only an empty
+          // pane, with nothing audited yet, traces once so it never opens blank.
+          if (!state.selection && !state.busy) trace("active");
+          focusPane();
+        } else clearInspect(); // pane hidden — drop the highlight
       });
     }
 
@@ -92,7 +96,7 @@
   // mode, retrace the active cell, ensure the pane is visible, and grab keyboard
   // focus so the arrow keys work immediately.
   //
-  // The retrace (applyMode + refresh) runs FIRST and unconditionally — it must
+  // The retrace (applyMode + trace) runs FIRST and unconditionally — it must
   // never be gated behind the show/hide sequence below. The old code ran it only
   // inside the .then() of addin.hide().then(() => addin.showAsTaskpane()), with a
   // silent .catch(function(){}) around the whole thing: when the pane was already
@@ -105,7 +109,7 @@
     state.visible = true;
     setStatus(""); // clear any stale status (e.g. "Closing MacTrace…" from a prior Esc)
     applyMode(mode);
-    refresh();
+    trace("active");
     focusPane();
 
     var addin = Office.addin;
@@ -185,56 +189,94 @@
     f.addEventListener("blur", function () { if (editing) finishEdit(true); });
   }
 
-  // ---- Selection tracking ---------------------------------------------------
-
-  function subscribeSelection() {
+  // ---- Grid clicks ----------------------------------------------------------
+  //
+  // Excel's selection never retraces the pane (see trace()). It's watched only so
+  // that a click into the grid (a) restores the preview fill instead of leaving it
+  // on the cell and (b) becomes the baseline that stops a preview still in flight
+  // from selecting its cell over your click. Each check runs on the grid queue,
+  // behind any preview, and compares against the exact selection the pane itself
+  // last left (X.reconcileSelection). No time window involved.
+  function watchSelection() {
     Excel.run(function (ctx) {
       ctx.workbook.onSelectionChanged.add(onSelectionChanged);
       return ctx.sync();
-    }).catch(function () {/* non-fatal */});
+    }).catch(function () {/* non-fatal: the fill is still restored on the next move or close */});
   }
 
-  var debounceTimer = null;
+  var selTimer = null;
   function onSelectionChanged() {
-    // Ignore selection changes we triggered ourselves (arrow preview / teleport);
-    // only rebuild for genuine, user-driven changes while the pane is visible.
-    if (Date.now() < state.suppressUntil) return Promise.resolve();
-    if (!state.visible) return Promise.resolve();
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(refresh, 70);
+    clearTimeout(selTimer);
+    selTimer = setTimeout(function () {
+      queueHL(function () { return X.reconcileSelection(); });
+    }, 100);
     return Promise.resolve();
   }
 
-  // ---- Core refresh ---------------------------------------------------------
-
-  function refresh() {
-    if (state.busy) { state.pending = true; return; }
+  // ---- Core trace -----------------------------------------------------------
+  //
+  // The pane audits an explicit target and never re-reads Excel's selection on
+  // its own. It used to rebuild on every selection change behind a 700 ms
+  // "ignore our own events" window, but live preview selects each referenced
+  // cell to scroll it into view, and whenever that select landed after the
+  // window (easy, with several Excel round-trips queued) the tree jumped to the
+  // precedent's formula. Now:
+  //
+  //   trace("active")               ribbon button / shortcut / first open: the
+  //                                 active cell, read once any preview in flight
+  //                                 has settled
+  //   trace({ address, selection }) drill (Enter, click) and Back: that cell
+  //   trace("current")              re-render the audited cell (tab switch, edit)
+  var renderedMode = null; // the mode #mt-content was last rendered in
+  function trace(req) {
+    if (state.busy) {
+      // Coalesce: a re-render never displaces a queued change of target.
+      if (!(req === "current" && state.pending)) state.pending = req;
+      return;
+    }
+    if (req === "current" && !state.selection) req = "active"; // nothing audited yet
     state.busy = true;
-    var wasProgrammatic = state.programmatic;
-    state.programmatic = false;
     clearInspect(); // a new audited cell / mode invalidates any inspection highlight
-    X.getSelection()
+    var prev = state.selection;
+    var read;
+    if (req === "active") read = queueHL(function () { return X.getSelection(); });
+    else if (req === "current") read = X.getTargetInfo(prev.selection, prev.address);
+    else read = X.getTargetInfo(req.selection || req.address, req.address);
+    read
       .then(function (sel) {
+        // Deliberately tracing a different cell starts a fresh audit, so the Back
+        // history goes. (Drill and Back maintain navStack themselves.)
+        if (req === "active" && !(prev && prev.address === sel.address)) state.navStack = [];
         state.selection = sel;
-        if (!wasProgrammatic) {
-          // A manual selection change starts a fresh audit: reset the rubber band.
-          state.origin = { address: sel.address };
-          state.navStack = [];
-        } else if (!state.origin) {
-          state.origin = { address: sel.address };
-        }
+        renderedMode = state.mode;
         renderHeader(sel);
         return state.mode === "precedents" ? renderPrecedents(sel) : renderDependents(sel);
       })
       .catch(function (e) {
-        setStatus("Couldn't read the selection: " + (e.message || e), true);
+        var msg = e.message || e;
+        if (req === "active") {
+          setStatus("Couldn't read the selection: " + msg, true);
+          // The ribbon button / shortcut may have switched the tab first: show the
+          // audited cell in that view rather than leave the old one under it.
+          if (state.selection && renderedMode !== state.mode && !state.pending) state.pending = "current";
+          return;
+        }
+        renderedMode = state.mode;
+        // The named cell can't be read (e.g. its sheet was renamed or deleted).
+        // Clear the view rather than leave the old one under a newly active tab.
+        var what = req === "current" ? prev.local : String(req.address).split("!").pop();
+        dom["mt-content"].textContent = "";
+        dom["mt-content"].appendChild(note("Couldn't read " + what + ". Select a cell and press ⌘⌥A to trace it."));
+        setStatus("Couldn't read " + what + ": " + msg, true);
       })
-      .then(finishRefresh, finishRefresh);
+      .then(finishTrace, finishTrace);
   }
 
-  function finishRefresh() {
+  function finishTrace() {
     state.busy = false;
-    if (state.pending) { state.pending = false; refresh(); }
+    var next = state.pending;
+    state.pending = null;
+    if (next) trace(next);
   }
 
   // ---- Header ---------------------------------------------------------------
@@ -283,7 +325,7 @@
   // (no separate input box). We swap its coloured tokens for the plain raw formula
   // so editing is clean, then restore the coloured render when done.
   function startEdit() {
-    if (!state.selection || editing) return;
+    if (!state.selection || editing || writing || state.busy) return; // let a pending write / re-render land
     editing = true;
     var box = dom["mt-formula"];
     formulaOriginal = state.selection.formula || "";
@@ -305,20 +347,30 @@
   }
 
   // Leave edit mode. On commit, if the text actually changed, write it back via
-  // X.setFormula → range.formulas and refresh; otherwise just restore the coloured
-  // display. Idempotent (a follow-up blur after Enter is a no-op).
+  // X.setFormula → range.formulas and re-render; otherwise just restore the
+  // coloured display. Idempotent (a follow-up blur after Enter is a no-op).
+  // The pane is a snapshot (it doesn't follow the grid), so the write only goes
+  // through if the cell still holds the formula the editor started from.
   function finishEdit(commit) {
     if (!editing) return;
     var box = dom["mt-formula"];
     var val = box.textContent;
     var changed = commit && state.selection && val !== formulaOriginal;
     if (changed) {
+      var base = formulaOriginal; // what the cell held when the editor opened
       formulaOriginal = val;
-      exitEditMode(); // refresh() will redraw the coloured line with the new formula
+      exitEditMode(); // trace() will redraw the coloured line with the new formula
       setStatus("Writing formula…");
-      X.setFormula(state.selection.address, val).then(function (res) {
-        if (res && res.ok) { setStatus("Formula updated."); refresh(); }
-        else {
+      writing = true;
+      X.setFormula(state.selection.address, val, base).then(function (res) {
+        writing = false; // trace() below keeps startEdit waiting until it has re-rendered
+        if (res && res.ok) { setStatus("Formula updated."); trace("current"); }
+        else if (res && res.reason === "changed") {
+          // Edited in the grid (or shifted by an inserted row) since it was
+          // traced: don't overwrite it. Show what it holds now instead.
+          setStatus("Not written: this cell changed in the grid since it was traced. Showing it as it is now.", true);
+          trace("current");
+        } else {
           setStatus("Couldn't write formula: " + (res && (res.message || res.reason) || "error"), true);
           if (state.selection) renderFormulaLine(state.selection);
         }
@@ -381,7 +433,7 @@
     var parsed = P.parse(sel.formula);
     var refTexts = P.collectRefs(parsed.ast).map(function (n) { return n.text; });
 
-    return X.resolveRefs(refTexts)
+    return X.resolveRefs(refTexts, sel.sheet)
       .catch(function (e) {
         // Value-resolution failed — refs still navigate/highlight (see describeNode),
         // they just won't show a live value. Log it so we know why values are blank.
@@ -490,7 +542,7 @@
     content.textContent = "";
     document.getElementById("mt-colhead").style.display = "";
 
-    return X.getDirectDependents().then(function (res) {
+    return X.getDirectDependents(sel.sheet, sel.selectionLocal).then(function (res) {
       content.textContent = "";
       if (!res.supported) {
         content.appendChild(note(
@@ -695,43 +747,59 @@
     if (!open && !collapsed) toggleCollapse(row, kids, twisty);
   }
 
-  // ---- Navigation (rubber band) ---------------------------------------------
+  // ---- Navigation (preview, drill, back) ------------------------------------
 
   // Inspect: as you arrow over a referenced cell, bring it into view and paint it
   // #27E7F5 (restoring the previously inspected range first), WITHOUT rebuilding
   // the tree. Debounced so holding an arrow key doesn't thrash the grid. The
-  // applyTemporaryHighlight call also selects the range, so it scrolls into view.
-  // Serialise grid-highlight work through hlQueue (declared up top): two Excel.run
-  // batches never overlap — concurrent fill operations on the grid can throw
-  // "object is in an invalid state" errors when arrow keys fire quickly.
+  // applyTemporaryHighlight call also selects the range, so it scrolls into view;
+  // that moves Excel's selection, which is harmless: the pane reads the selection
+  // only for a deliberate trace.
+  // Serialise grid work through hlQueue (declared up top): two Excel.run batches
+  // never overlap (concurrent fill operations on the grid can throw "object is in
+  // an invalid state" when arrow keys fire quickly), and anything that must see
+  // the settled selection (a trace, a grid-click check) queues behind it.
   function queueHL(task) {
     hlQueue = hlQueue.then(task, task);
     return hlQueue;
   }
 
+  // Each preview carries a generation number. A newer preview, or anything that
+  // moves on (a trace, a drill, closing the pane), bumps it, so previews still
+  // waiting on the grid queue become no-ops and the one in flight stops before
+  // it selects its cell. Otherwise a backlog built up by tapping ↓ could select
+  // a precedent AFTER you clicked another cell, and a trace would read that.
   var inspectTimer = null;
+  var inspectGen = 0;
   function inspect(address) {
-    if (!address) return;
-    state.suppressUntil = Date.now() + 700; // ignore the resulting selection event
-    state.programmatic = true;
+    // While a trace is reading, the rows on screen belong to the tree it is about
+    // to replace: never preview (select) one of their cells.
+    if (!address || state.busy) return;
+    address = qualify(address);
+    var gen = ++inspectGen;
     clearTimeout(inspectTimer);
     inspectTimer = setTimeout(function () {
-      state.suppressUntil = Date.now() + 700;
       queueHL(function () {
-        return X.applyTemporaryHighlight(address).then(function (res) {
-          // DIAGNOSTIC: surface the full outcome of every highlight attempt so we
-          // can see, from inside Excel, whether it painted, why it didn't, or threw.
-          reportInspect(address, res);
+        if (gen !== inspectGen) return; // superseded while it waited
+        var current = function () { return gen === inspectGen; };
+        return X.applyTemporaryHighlight(address, current).then(function (res) {
+          if (res && res.superseded) return;
           // applyTemporaryHighlight calls range.select() to scroll the cell into the
           // viewport, which makes Excel grab keyboard focus. Pull it straight back
-          // so the arrow keys keep driving the pane without a manual click.
-          refocusPane();
+          // so the arrow keys keep driving the pane without a manual click. Not
+          // while the pane is closing (Esc hands focus to the grid on purpose).
+          if (state.visible && (current() || (res && res.scrolled))) refocusPane();
+          // DIAGNOSTIC: surface the full outcome of every highlight attempt so we
+          // can see, from inside Excel, whether it painted, why it didn't, or threw.
+          // Only for a preview the pane hasn't moved past since.
+          if (current()) reportInspect(address, res);
         });
       });
     }, 70);
   }
   function clearInspect() {
     clearTimeout(inspectTimer);
+    inspectGen++; // cancel previews that haven't selected their cell yet
     queueHL(function () { return X.clearTemporaryHighlight(); });
   }
 
@@ -739,13 +807,15 @@
   // shared-runtime visibility API; when the pane disappears the grid is the only
   // surface left, so keyboard focus lands there by default. This sidesteps the
   // webview->grid focus transfer that Excel-for-Mac otherwise blocks (the reason
-  // the old "return focus to grid on Esc" never worked). Drop the highlight
-  // first; hide() runs regardless of whether that cleanup succeeds.
+  // the old "return focus to grid on Esc" never worked). The highlight is
+  // restored on the grid queue, so it never overlaps a preview's Excel batch;
+  // hide() doesn't wait for it (the runtime lives on, and the Hidden handler
+  // queues the same cleanup).
   function closePane() {
     setStatus("Closing MacTrace…");
-    clearTimeout(inspectTimer);
-    state.suppressUntil = Date.now() + 500; // ignore the self-caused selection event
-    return X.clearTemporaryHighlight().catch(function () {})
+    state.visible = false; // a late preview must not pull focus back into a closing pane
+    clearInspect();
+    return Promise.resolve()
       .then(function () {
         var addin = Office.addin;
         if (addin && typeof addin.hide === "function") return addin.hide();
@@ -754,6 +824,7 @@
         blurWebview();
       })
       .catch(function (e) {
+        state.visible = true;
         setStatus("Esc: couldn't close the pane" + (e && e.message ? " — " + e.message : ""), true);
       });
   }
@@ -791,13 +862,21 @@
   // Commit: make a referenced cell the new audited cell and rebuild the tree there.
   function teleport(address) {
     if (!address) return;
-    if (state.selection) state.navStack.push(state.selection.address);
-    navigateAndRebuild(address, function (res) {
+    address = qualify(address);
+    // Record where we came from right away, so a Backspace pressed mid-jump steps
+    // back to it; but not twice in a row (a double click), and take back exactly
+    // this entry if the jump fails.
+    var from = null;
+    var top = state.navStack[state.navStack.length - 1];
+    if (state.selection && !(top && top.address === state.selection.address)) {
+      from = { address: state.selection.address, selection: state.selection.selection };
+      state.navStack.push(from);
+    }
+    navigateAndRebuild({ address: address }, function (res) {
       if (!res.ok) {
-        if (res.reason === "external") setStatus("That reference is in another workbook — open it to follow.", true);
-        else if (res.reason === "missing-sheet") setStatus("Source sheet not found.", true);
-        else setStatus("Couldn't navigate there.", true);
-        state.navStack.pop();
+        setStatus(jumpError(res), true);
+        var i = from ? state.navStack.lastIndexOf(from) : -1;
+        if (i !== -1) state.navStack.splice(i, 1);
         return false; // don't rebuild
       }
       setStatus("");
@@ -805,27 +884,47 @@
     });
   }
 
-  // Navigate Excel and explicitly rebuild the pane at the destination, ignoring
-  // the selection event we cause (so we rebuild even if we'd pre-previewed there).
-  function navigateAndRebuild(address, onResult) {
-    state.programmatic = true;
-    state.suppressUntil = Date.now() + 700;
+  // Drill / Back: move Excel to the target so the grid follows you, then audit
+  // that exact target, never whatever Excel reports as selected afterwards. The
+  // jump queues behind any preview still in flight, so a late preview select
+  // can't land after it.
+  function navigateAndRebuild(target, onResult) {
     clearTimeout(inspectTimer); // cancel any pending live-preview highlight
-    X.navigateTo(address).then(function (res) {
+    inspectGen++;
+    queueHL(function () { return X.navigateTo(target.address); }).then(function (res) {
       var ok = onResult ? onResult(res) : res.ok;
-      if (ok) {
-        state.programmatic = true; // refresh() consumes this; keeps the origin
-        refresh();
-      }
+      if (!ok) return;
+      trace(target);
+      if (state.visible) refocusPane(); // the jump's select() handed keyboard focus to the grid
     });
   }
 
+  function jumpError(res) {
+    if (res.reason === "external") return "That reference is in another workbook — open it to follow.";
+    if (res.reason === "missing-sheet") return "Source sheet not found.";
+    return "Couldn't navigate there.";
+  }
+
   // Backspace steps back one hop through the drill history (no button — keyboard
-  // only). navStack is still maintained by teleport, so this keeps working.
+  // only). navStack is maintained by teleport. An entry that can't be reached any
+  // more (its sheet was renamed or deleted) is reported and dropped, so the next
+  // Backspace goes further back instead of failing on it forever.
   function goBack() {
     if (!state.navStack.length) return;
-    var addr = state.navStack.pop();
-    navigateAndRebuild(addr);
+    var entry = state.navStack.pop();
+    navigateAndRebuild(entry, function (res) {
+      if (res.ok) { setStatus(""); return true; }
+      setStatus("Couldn't go back to " + String(entry.address).split("!").pop() + ": " + jumpError(res), true);
+      return false;
+    });
+  }
+
+  // A bare reference in a formula lives on the formula's own sheet. Pin it there:
+  // preview may have activated another sheet, and the Excel layer resolves an
+  // unqualified reference against the ACTIVE one.
+  function qualify(ref) {
+    if (!ref || String(ref).indexOf("!") !== -1 || !state.selection) return ref;
+    return "'" + String(state.selection.sheet).replace(/'/g, "''") + "'!" + ref;
   }
 
   // ---- Mode ------------------------------------------------------------------
@@ -838,7 +937,7 @@
   function setMode(mode) {
     if (state.mode === mode) return;
     applyMode(mode);
-    refresh();
+    trace("current"); // same audited cell, other view; never the live selection
   }
 
   // ---- Small DOM/util helpers ----------------------------------------------

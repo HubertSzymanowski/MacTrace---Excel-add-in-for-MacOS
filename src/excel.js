@@ -13,7 +13,7 @@
   // Build tag — bumped on every change to this layer so the pane can show which
   // code is actually running (shared-runtime JS only reloads on a full Excel
   // restart, so a stale build is a real possibility to rule out).
-  var BUILD = "grid-v15";
+  var BUILD = "grid-v16";
 
   // ---- Capability detection -------------------------------------------------
 
@@ -90,29 +90,80 @@
     return null;
   }
 
-  // ---- Selection ------------------------------------------------------------
+  // The worksheet a parsed reference lives on: its own sheet (matched as above)
+  // or, when the reference names none, `fallback`. Null if the sheet is missing.
+  function sheetFor(wsCol, fallback, p) {
+    if (!p.sheet) return fallback;
+    var name = matchSheetName(wsCol.items, p.sheet);
+    return name != null ? wsCol.getItem(name) : null;
+  }
 
+  // ---- Selection / audited target -------------------------------------------
+
+  // The active cell as the pane last left it: after a deliberate trace read it,
+  // after our own select() (preview, drill), or once a grid-click check adopted
+  // yours. A preview about to select its cell compares against it, so it never
+  // selects over a click you made in the meantime. null = unknown.
+  var lastActive = null;
+
+  // The audited target as the pane uses it: `cell` is the cell whose formula is
+  // traced, `range` the range Dependents analyses (both already loaded).
+  function describeTarget(cell, range) {
+    var formula = cell.formulas[0][0];
+    var formulaStr = formula == null ? "" : String(formula);
+    return {
+      address: cell.address, // e.g. "Calcs!J510"
+      local: stripSheet(cell.address),
+      sheet: cell.worksheet.name,
+      formula: formulaStr,
+      isFormula: formulaStr.charAt(0) === "=",
+      text: cell.text[0][0],
+      valueType: cell.valueTypes[0][0],
+      selection: range.address,
+      selectionLocal: stripSheet(range.address),
+      selectionCount: range.cellCount
+    };
+  }
+
+  // What Excel has selected right now. The pane reads this ONLY for a deliberate
+  // trace (ribbon button, shortcut, first open): live preview moves the selection,
+  // so otherwise it is never "the cell being audited".
   function getSelection() {
     return Excel.run(function (ctx) {
       var cell = ctx.workbook.getActiveCell();
       cell.load("address, formulas, text, valueTypes, worksheet/name");
       var sel = ctx.workbook.getSelectedRange();
-      sel.load("address, cellCount, rowCount, columnCount");
+      sel.load("address, cellCount");
       return ctx.sync().then(function () {
-        var formula = cell.formulas[0][0];
-        var formulaStr = formula == null ? "" : String(formula);
-        return {
-          address: cell.address, // e.g. "Calcs!J510"
-          local: stripSheet(cell.address),
-          sheet: cell.worksheet.name,
-          formula: formulaStr,
-          isFormula: formulaStr.charAt(0) === "=",
-          text: cell.text[0][0],
-          valueType: cell.valueTypes[0][0],
-          selection: sel.address,
-          selectionLocal: stripSheet(sel.address),
-          selectionCount: sel.cellCount
-        };
+        lastActive = cell.address;
+        return describeTarget(cell, sel);
+      });
+    });
+  }
+
+  // Same shape as getSelection(), for an EXPLICIT target instead of the live
+  // selection: `rangeRef` is the audited range, `cellRef` the cell whose formula
+  // is traced (its top-left cell; defaults to the range's). This is how the pane
+  // drills, steps back and re-renders without ever reading the selection.
+  function getTargetInfo(rangeRef, cellRef) {
+    var pr = splitRef(rangeRef);
+    var pc = splitRef(cellRef || rangeRef);
+    if (pr.external || pc.external) {
+      return Promise.reject(new Error("it's in another workbook"));
+    }
+    return Excel.run(function (ctx) {
+      var wsCol = ctx.workbook.worksheets;
+      var active = wsCol.getActiveWorksheet();
+      wsCol.load("items/name");
+      return ctx.sync().then(function () {
+        var wsR = sheetFor(wsCol, active, pr);
+        var wsC = sheetFor(wsCol, active, pc);
+        if (!wsR || !wsC) throw new Error("sheet '" + (wsR ? pc.sheet : pr.sheet) + "' not found");
+        var range = wsR.getRange(stripDollars(pr.body));
+        var cell = wsC.getRange(stripDollars(pc.body)).getCell(0, 0);
+        range.load("address, cellCount");
+        cell.load("address, formulas, text, valueTypes, worksheet/name");
+        return ctx.sync().then(function () { return describeTarget(cell, range); });
       });
     });
   }
@@ -125,7 +176,9 @@
   //   1. confirm which referenced sheets exist
   //   2. read each range's dimensions (metadata only)
   //   3. read the displayed value for single cells only
-  function resolveRefs(refTexts) {
+  // References that name no sheet resolve on `baseSheet` (the audited formula's
+  // own sheet, exact name), not on the active one, which preview may have switched.
+  function resolveRefs(refTexts, baseSheet) {
     if (!refTexts || !refTexts.length) return Promise.resolve({});
     var unique = [];
     var seen = {};
@@ -135,6 +188,8 @@
 
     return Excel.run(function (ctx) {
       var active = ctx.workbook.worksheets.getActiveWorksheet();
+      var base = baseSheet ? ctx.workbook.worksheets.getItemOrNullObject(baseSheet) : null;
+      if (base) base.load("isNullObject");
       var entries = unique.map(function (text) {
         var p = splitRef(text);
         var e = { text: text, parsed: p, sheetProxy: null, sheetMissing: false, range: null, single: false };
@@ -146,6 +201,7 @@
       });
 
       return ctx.sync().then(function () {
+        var home = base && !base.isNullObject ? base : active;
         entries.forEach(function (e) {
           if (e.parsed.external) return;
           var ws;
@@ -153,7 +209,7 @@
             if (e.sheetProxy.isNullObject) { e.sheetMissing = true; return; }
             ws = e.sheetProxy;
           } else {
-            ws = active;
+            ws = home;
           }
           try {
             e.range = ws.getRange(stripDollars(e.parsed.body));
@@ -227,7 +283,10 @@
         if (!ws) return { ok: false, reason: "missing-sheet" };
         ws.activate();
         ws.getRange(body).select();
+        var ac = ctx.workbook.getActiveCell();
+        ac.load("address");
         return ctx.sync().then(function () {
+          lastActive = ac.address;
           return { ok: true };
         });
       });
@@ -238,12 +297,17 @@
 
   // ---- Dependents -----------------------------------------------------------
 
-  function getDirectDependents() {
+  // Direct dependents of the audited range, given as `sheet` (an exact worksheet
+  // name as Excel returned it, so a plain getItem is safe) + its local address.
+  // With no arguments, of the current selection.
+  function getDirectDependents(sheet, rangeLocal) {
     if (!CAPS.dependents()) {
       return Promise.resolve({ supported: false, items: [] });
     }
     return Excel.run(function (ctx) {
-      var rng = ctx.workbook.getSelectedRange();
+      var rng = sheet
+        ? ctx.workbook.worksheets.getItem(sheet).getRange(stripDollars(rangeLocal))
+        : ctx.workbook.getSelectedRange();
       var deps = rng.getDirectDependents();
       // Load BOTH: the per-area addresses (the reliable source on Excel for Mac)
       // AND the combined address as a fallback.
@@ -386,6 +450,43 @@
     });
   }
 
+  // A selection change in the grid. The pane runs this on its grid queue, after
+  // any preview in flight, so it sees the settled selection. Whatever the active
+  // cell now is becomes the baseline (see lastActive). The preview fill is kept
+  // only while the selection is EXACTLY what our own select() left. That is
+  // recorded rather than recomputed because Excel widens it to whole merged
+  // areas; any other selection, even one that merely contains the cell, restores
+  // the fill, so it can't leak into a copy, your own formatting or an inserted
+  // row. A multi-area selection is never ours. If Excel can't be read at all
+  // (e.g. you're typing in a cell), nothing changes and the next change re-checks.
+  function reconcileSelection() {
+    return Excel.run(function (ctx) {
+      var active = ctx.workbook.getActiveCell(); // readable even with several areas selected
+      active.load("address");
+      return ctx.sync().then(function () {
+        lastActive = active.address;
+        var rec = hl;
+        if (!rec) return { rec: null };
+        var sel = ctx.workbook.getSelectedRange();
+        sel.load("address, worksheet/name");
+        return ctx.sync().then(function () {
+          var onIt = rec.selected
+            ? sameName(sel.address, rec.selected)
+            : sameName(sel.worksheet.name, rec.sheet) &&
+              stripSheet(sel.address).toUpperCase() === String(rec.address).toUpperCase();
+          return { rec: rec, onIt: onIt };
+        }, function () {
+          return { rec: rec, onIt: false }; // getSelectedRange rejects a multi-area selection
+        });
+      });
+    }).then(function (r) {
+      if (!r.rec || r.onIt || hl !== r.rec) return { ok: true, cleared: false };
+      return clearTemporaryHighlight();
+    }, function () {
+      return { ok: true, cleared: false };
+    });
+  }
+
   // Resolve a reference to a concrete { sheet name, local address } and guard the
   // size — the reliable part (loading name/address/cellCount rarely fails).
   function resolveRange(p, body) {
@@ -444,17 +545,24 @@
   //   2. readFill     — original colour, best-effort, isolated (can't block paint)
   //   3. PAINT        — minimal isolated batch: set fill.color and sync
   //   4. SCROLL       — activate + select, best-effort (paint already committed)
-  function applyTemporaryHighlight(refText) {
+  // `stillWanted` (optional) is asked before the paint and before the scroll; once
+  // the pane has moved on, a stale preview stops there and returns
+  // { superseded: true }, so it can't select its cell after you've moved on.
+  function applyTemporaryHighlight(refText, stillWanted) {
+    var wanted = function () { return !stillWanted || stillWanted(); };
+    var SUPERSEDED = { ok: false, reason: "superseded", superseded: true };
     var p = splitRef(refText);
     if (p.external) return clearTemporaryHighlight().then(function () {
-      return { ok: false, reason: "external" };
+      return wanted() ? { ok: false, reason: "external" } : SUPERSEDED;
     });
     var body = stripDollars(p.body);
     return clearTemporaryHighlight()
       .then(function () { return resolveRange(p, body); })
       .then(function (r) {
+        if (!wanted()) return SUPERSEDED;
         if (!r.ok) return r; // missing-sheet / too-large / invalid range
         return readFill(r.sheet, r.address).then(function (original) {
+          if (!wanted()) return SUPERSEDED;
           // --- PAINT: the operation that actually colours the cell -----------
           return Excel.run(function (ctx) {
             ctx.workbook.worksheets.getItem(r.sheet).getRange(r.address)
@@ -463,16 +571,37 @@
           }).then(function () {
             hl = { sheet: r.sheet, address: r.address, color: original };
             persistHighlight(); // highlight is live; record it for recovery
+            // Painted but no longer wanted: skip the select. Whatever superseded
+            // it is queued next and restores this fill first.
+            if (!wanted()) return { ok: true, scrolled: false, superseded: true };
             // --- SCROLL into view (best-effort; paint is already committed) ---
+            // Not if you've clicked into the grid since the pane last moved the
+            // selection (the active cell is no longer where we left it): the
+            // preview must not undo your click or pull focus back. The grid-click
+            // check queued behind it restores this fill.
+            var rec = hl;
             return Excel.run(function (ctx) {
-              var ws = ctx.workbook.worksheets.getItem(r.sheet);
-              ws.activate();
+              var before = ctx.workbook.getActiveCell();
+              before.load("address");
               return ctx.sync().then(function () {
-                ws.getRange(r.address).select();
-                return ctx.sync();
+                if (lastActive != null && !sameName(before.address, lastActive)) return { moved: true };
+                var ws = ctx.workbook.worksheets.getItem(r.sheet);
+                ws.activate();
+                return ctx.sync().then(function () {
+                  ws.getRange(r.address).select();
+                  var sel = ctx.workbook.getSelectedRange(); // widened to whole merged areas
+                  var after = ctx.workbook.getActiveCell();
+                  sel.load("address");
+                  after.load("address");
+                  return ctx.sync().then(function () {
+                    lastActive = after.address;
+                    rec.selected = sel.address; // exactly what our select left
+                    return { ok: true, scrolled: true };
+                  });
+                });
               });
             }).then(
-              function () { return { ok: true, scrolled: true }; },
+              function (res) { return res.moved ? { ok: true, scrolled: false, superseded: true } : res; },
               function () { return { ok: true, scrolled: false }; }
             );
           });
@@ -480,13 +609,18 @@
       })
       .catch(function (e) {
         try { console.error("MacTrace applyTemporaryHighlight failed:", e); } catch (_) {}
+        if (!wanted()) return SUPERSEDED;
         return { ok: false, reason: "error", message: e && e.message ? e.message : String(e) };
       });
   }
 
   // Write a new formula (or literal value) back into a single cell, then sync so
   // Excel recalculates. Uses the same robust sheet resolution as everything else.
-  function setFormula(refText, formula) {
+  // With `expected`, it's a compare-and-set: the write happens only if the cell
+  // still holds that formula, else { ok: false, reason: "changed" }. The pane
+  // shows a snapshot, and the cell may have been edited in the grid (or shifted
+  // by an inserted row) since it was traced.
+  function setFormula(refText, formula, expected) {
     var p = splitRef(refText);
     if (p.external) return Promise.resolve({ ok: false, reason: "external" });
     var body = stripDollars(p.body);
@@ -504,8 +638,18 @@
           if (name != null) ws = wsCol.getItem(name);
         }
         if (!ws) return { ok: false, reason: "missing-sheet" };
-        ws.getRange(body).formulas = [[formula]];
-        return ctx.sync().then(function () { return { ok: true }; });
+        var range = ws.getRange(body);
+        if (expected == null) {
+          range.formulas = [[formula]];
+          return ctx.sync().then(function () { return { ok: true }; });
+        }
+        range.load("formulas");
+        return ctx.sync().then(function () {
+          var live = range.formulas[0][0];
+          if (String(live == null ? "" : live) !== String(expected)) return { ok: false, reason: "changed" };
+          range.formulas = [[formula]];
+          return ctx.sync().then(function () { return { ok: true }; });
+        });
       });
     }).catch(function (e) {
       return { ok: false, reason: "error", message: e && e.message ? e.message : String(e) };
@@ -517,11 +661,13 @@
     CAPS: CAPS,
     HL_COLOR: HL_COLOR,
     getSelection: getSelection,
+    getTargetInfo: getTargetInfo,
     resolveRefs: resolveRefs,
     navigateTo: navigateTo,
     getDirectDependents: getDirectDependents,
     applyTemporaryHighlight: applyTemporaryHighlight,
     clearTemporaryHighlight: clearTemporaryHighlight,
+    reconcileSelection: reconcileSelection,
     setFormula: setFormula
   };
 })(window);

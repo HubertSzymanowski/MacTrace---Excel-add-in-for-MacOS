@@ -35,7 +35,7 @@
         <main id="mt-content" class="mt-content" tabindex="0"></main>
         <footer class="mt-footer">
           <div id="mt-status" class="mt-status"></div>
-          <div class="mt-hint">↑↓ move · → / ← expand/collapse · Enter go · Backspace back · Esc close</div>
+          <div class="mt-hint">⌘⌥A trace · ↑↓ move · → / ← expand/collapse · Enter go · Backspace back · Esc close</div>
         </footer>
       </div>
     </div>
@@ -71,7 +71,10 @@
           onVisibilityModeChanged: function (cb) { window.__visCb = cb; }
         }
       };
-      // Minimal Excel.run so the pane's selection subscription works.
+      // Minimal Excel.run so the pane's grid-click watcher can subscribe.
+      // window.__fireSel() fires a selection-changed event (as Excel does after
+      // ANY select, including the pane's own preview); window.__userSelect(addr)
+      // simulates clicking a cell in the grid: moves the selection, then fires.
       window.Excel = {
         run: function (cb) {
           var ctx = {
@@ -81,45 +84,74 @@
           return Promise.resolve(cb(ctx));
         }
       };
-      // A tiny fake model resembling the Arixcel screenshot.
+      window.__userSelect = function (addr) {
+        window.MacTraceExcel._active = addr;
+        if (window.__fireSel) window.__fireSel();
+      };
+      // A tiny fake workbook resembling the Arixcel screenshot. `_active` is the
+      // cell Excel has selected. Like real Excel, the pane's own preview and drill
+      // move it (range.select()); that must never retrace the pane.
       window.MacTraceExcel = {
-        BUILD: "grid-v15",
+        BUILD: "grid-v16",
         CAPS: { dependents: function () { return true; } },
-        _addr: "Calcs!J510",
+        _active: "Calcs!J510",
+        _cells: {
+          "Calcs!J510": { formula: "=IF(AD$3>$G$518,OFFSET(AD510,,-$G$518),0)", text: "5,146.59" },
+          "Calcs!AD510": { formula: "=AD509*2", text: "11,984.44" },
+          "Calcs!K510": { formula: "=J510*1.1", text: "5,661.25" }
+        },
         _values: {
           "AD$3": { kind: "cell", display: "2026", valueType: "Double", address: "Calcs!AD3" },
           "$G$518": { kind: "cell", display: "-20", valueType: "Double", address: "Calcs!G518" },
           "AD510": { kind: "cell", display: "11,984.44", valueType: "Double", address: "Calcs!AD510" }
         },
-        getSelection: function () {
-          var a = this._addr, local = a.split("!").pop();
-          if (a === "Calcs!J510") {
-            return Promise.resolve({
-              address: a, local: "J510", sheet: "Calcs",
-              formula: "=IF(AD$3>$G$518,OFFSET(AD510,,-$G$518),0)",
-              isFormula: true, text: "5,146.59", valueType: "Double",
-              selection: a, selectionLocal: "J510", selectionCount: 1
-            });
-          }
-          return Promise.resolve({
-            address: a, local: local, sheet: "Calcs", formula: "=AD510*2",
-            isFormula: true, text: "23,968.88", valueType: "Double",
-            selection: a, selectionLocal: local, selectionCount: 1
-          });
+        // "'Calcs'!$G$518" / "G518" -> "Calcs!G518"
+        _norm: function (ref) {
+          var s = String(ref), bang = s.lastIndexOf("!");
+          var sheet = bang === -1 ? "Calcs" : s.slice(0, bang).replace(/^'|'$/g, "").replace(/''/g, "'");
+          return sheet + "!" + s.slice(bang + 1).replace(/\$/g, "");
         },
-        resolveRefs: function (refs) {
+        _info: function (addr) {
+          var c = this._cells[addr] || { formula: "", text: "0" };
+          var bang = addr.lastIndexOf("!"), local = addr.slice(bang + 1);
+          return {
+            address: addr, local: local, sheet: addr.slice(0, bang), formula: c.formula,
+            isFormula: c.formula.charAt(0) === "=", text: c.text, valueType: "Double",
+            selection: addr, selectionLocal: local, selectionCount: 1
+          };
+        },
+        // Test switches: __readDelay (ms) slows the reads a trace makes;
+        // __multiArea makes getSelection fail like a Cmd+click selection;
+        // __sheetGone makes explicit reads fail like a renamed sheet;
+        // __navFail makes navigateTo fail like a missing sheet.
+        _lastActive: null, // like excel.js lastActive: where the pane last left the active cell
+        _selReads: 0, // how often the pane read the live selection
+        _later: function (v) { return new Promise(function (res) { setTimeout(function () { res(v); }, window.__readDelay || 0); }); },
+        getSelection: function () {
+          this._selReads++;
+          if (window.__multiArea) return Promise.reject(new Error("multiple selections"));
+          this._lastActive = this._active;
+          return this._later(this._info(this._active));
+        },
+        getTargetInfo: function (rangeRef, cellRef) {
+          if (window.__sheetGone) return Promise.reject(new Error("sheet 'Calcs' not found")); // simulate a renamed sheet
+          return this._later(this._info(this._norm(cellRef || rangeRef)));
+        },
+        resolveRefs: function (refs, baseSheet) {
           var self = this, o = {};
           refs.forEach(function (r) {
-            o[r] = self._values[r] || { kind: "cell", display: "0", valueType: "Double", address: "Calcs!" + r.replace(/\$/g, "") };
+            o[r] = self._values[r] || { kind: "cell", display: "0", valueType: "Double", address: (baseSheet || "Calcs") + "!" + r.replace(/\$/g, "") };
           });
           return Promise.resolve(o);
         },
         navigateTo: function (addr) {
-          this._addr = addr;
-          setTimeout(function () { if (window.__fireSel) window.__fireSel(); }, 10);
+          if (window.__navFail) return Promise.resolve({ ok: false, reason: "missing-sheet" });
+          this._active = this._lastActive = this._norm(addr);
           return Promise.resolve({ ok: true });
         },
-        getDirectDependents: function () {
+        _depsOf: null, // the range the pane last asked dependents for
+        getDirectDependents: function (sheet, local) {
+          this._depsOf = sheet + "!" + local;
           return Promise.resolve({ supported: true, items: [
             { address: "Calcs!K510", local: "K510" },
             { address: "Summary!B12", local: "Summary!B12" }
@@ -127,13 +159,39 @@
         },
         HL_COLOR: "#27E7F5",
         _highlighted: null,
-        applyTemporaryHighlight: function (addr) { this._highlighted = addr; return Promise.resolve({ ok: true, scrolled: true }); },
+        // window.__hlDelay (ms) emulates the several Excel round-trips a real
+        // preview takes before it selects its cell, so a backlog can build up.
+        applyTemporaryHighlight: function (addr, stillWanted) {
+          var self = this, wanted = function () { return !stillWanted || stillWanted(); };
+          return new Promise(function (res) { setTimeout(res, window.__hlDelay || 0); }).then(function () {
+            if (!wanted()) return { ok: false, reason: "superseded", superseded: true };
+            self._highlighted = self._norm(addr);
+            if (!wanted()) return { ok: true, scrolled: false, superseded: true };
+            // like excel.js: never select over a grid click made since the pane last moved the selection
+            if (self._lastActive != null && self._active !== self._lastActive) return { ok: true, scrolled: false, superseded: true };
+            self._active = self._lastActive = self._highlighted; // real Excel selects it to scroll it into view
+            return { ok: true, scrolled: true };
+          });
+        },
         clearTemporaryHighlight: function () { this._highlighted = null; return Promise.resolve({ ok: true, cleared: true }); },
+        reconcileSelection: function () {
+          this._lastActive = this._active; // your selection becomes the baseline
+          if (!this._highlighted || this._highlighted === this._active) return Promise.resolve({ ok: true, cleared: false });
+          return this.clearTemporaryHighlight(); // anything but exactly our own selection clears
+        },
         _written: null,
-        setFormula: function (addr, formula) { this._written = { addr: addr, formula: formula }; return Promise.resolve({ ok: true }); }
+        setFormula: function (addr, formula, expected) {
+          var c = this._cells[this._norm(addr)];
+          if (expected != null && c && c.formula !== expected) return Promise.resolve({ ok: false, reason: "changed" });
+          this._written = { addr: addr, formula: formula };
+          if (c) c.formula = formula;
+          return Promise.resolve({ ok: true });
+        }
       };
     </script>
     <script src="../src/formula-parser.js"></script>
     <script src="../src/taskpane.js"></script>
+    <!-- Excel shows the pane once the shared runtime is up. -->
+    <script>if (window.__visCb) window.__visCb({ visibilityMode: "Taskpane" });</script>
   </body>
 </html>
