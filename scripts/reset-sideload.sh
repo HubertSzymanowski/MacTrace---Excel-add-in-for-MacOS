@@ -39,6 +39,6 @@ echo "5/5  Reopening Excel…"
 open -a "Microsoft Excel"
 
 echo ""
-echo "Done. When Excel opens, look on the Home tab for the MacTrace group,"
+echo "Done. When Excel opens, look on the Formulas tab for the MacTrace group,"
 echo "or Insert tab > My Add-ins > Developer Add-ins."
 echo "(Keep your 'npm start' server running in another terminal.)"

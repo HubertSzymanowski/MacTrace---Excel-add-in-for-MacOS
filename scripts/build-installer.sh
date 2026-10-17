@@ -105,8 +105,8 @@ cat > "$WORK/resources/conclusion.html" <<'EOF'
   code { background: #e6f2ec; padding: 1px 4px; border-radius: 3px; }
 </style></head><body>
 <h2>All done!</h2>
-<p>Open Excel and look on the <b>Home</b> tab for the <b>MacTrace</b> buttons
-(<b>Trace</b> and <b>Dependents</b>).</p>
+<p>Open Excel and look on the <b>Formulas</b> tab for the <b>MacTrace</b> buttons
+(<b>Trace</b> and <b>Dependents</b>), or just press <b>Cmd+Option+A</b>.</p>
 <p>If Excel was already open, quit it fully (<code>Cmd+Q</code>) and open it again.</p>
 <p>You need an internet connection when the MacTrace pane opens.</p>
 <p style="color:#6b6b6b">To uninstall: delete <code>MacTrace.hosted.manifest.xml</code> from

@@ -32,8 +32,8 @@ for a friendly walkthrough.
    project): System Settings → **Privacy & Security** → scroll down → **Open
    Anyway**. On macOS before Sequoia: right-click the file → **Open** → **Open**.
 3. **Follow the installer** — no password needed; it closes and reopens Excel
-   for you (save your work first). Then look on Excel's **Home** tab for the
-   **Trace** and **Dependents** buttons.
+   for you (save your work first). Then look on Excel's **Formulas** tab for the
+   **Trace** and **Dependents** buttons, or just press **Cmd+Option+A**.
 
 That's it. No terminal, no Node.js, nothing running in the background: the
 installer puts a single manifest file into Excel's add-in folder, pointing at
@@ -93,8 +93,11 @@ npm run autostart      # runs the HTTPS server now + at every login (no more npm
 npm run sideload       # copies the DEV manifest into Excel's add-in folder
 ```
 
-Then **fully quit and reopen Excel**. On the **Home** tab you'll see a
-**MacTrace** group with **Trace** and **Dependents** buttons.
+Then **fully quit and reopen Excel**. On the **Formulas** tab you'll see a
+**MacTrace** group with **Trace** and **Dependents** buttons. (It sits on
+Formulas, not Home, on purpose: Excel for Mac shows a "Got it" callout for a
+sideloaded add-in every session, anchored to this group, and skips it when the
+group isn't on screen.)
 
 > First run creates and trusts a `localhost` certificate (macOS may ask for your
 > password; it expires after ~30 days — rerun `npm run certs`). If the pane is

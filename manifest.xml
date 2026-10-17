@@ -12,7 +12,7 @@
   <ProviderName>MacTrace</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="MacTrace" />
-  <Description DefaultValue="Fast, keyboard-driven formula tracing for Excel on Mac. Explore precedents and dependents, map a worksheet's formula structure, and snap back to where you started." />
+  <Description DefaultValue="Fast, keyboard-driven formula tracing for Excel on Mac. Trace precedents (Cmd+Option+A) and dependents (Cmd+Option+Shift+A)." />
 
   <IconUrl DefaultValue="https://localhost:3100/assets/icon-64.png" />
   <HighResolutionIconUrl DefaultValue="https://localhost:3100/assets/icon-128.png" />
@@ -53,7 +53,12 @@
           <FunctionFile resid="Taskpane.Url" />
 
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
-            <OfficeTab id="TabHome">
+            <!-- On the Formulas tab (next to Excel's own Formula Auditing), NOT Home:
+                 Excel for Mac re-registers a sideloaded add-in every launch and shows
+                 a "Got it" callout anchored to this group each time. It can't be
+                 turned off, but Excel silently drops it when the group isn't on
+                 screen, and you're normally on Home when it fires. -->
+            <OfficeTab id="TabFormulas">
               <Group id="MacTrace.Group">
                 <Label resid="Group.Label" />
                 <Icon>

@@ -36,4 +36,4 @@ fs.mkdirSync(WEF, { recursive: true });
 fs.copyFileSync(SRC, DEST);
 console.log("Sideloaded MacTrace.");
 console.log("  -> " + DEST);
-console.log("Now: fully quit and reopen Excel. Look for the MacTrace group on the Home tab.");
+console.log("Now: fully quit and reopen Excel. Look for the MacTrace group on the Formulas tab.");
