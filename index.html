@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacTrace — formula tracing for Excel on Mac</title>
+<meta name="description" content="Free, keyboard-driven formula tracing add-in for Excel on Mac. Trace precedents and dependents, jump to source cells, audit spreadsheets fast.">
+<link rel="icon" href="assets/icon-32.png">
+<style>
+  /* Matches the task pane palette (src/taskpane.css). Deliberately minimal —
+     this page will get a real design pass later. */
+  :root {
+    --mt-accent: #217346;
+    --mt-accent-weak: #e6f2ec;
+    --mt-text: #1f1f1f;
+    --mt-muted: #6b6b6b;
+    --mt-line: #e3e3e3;
+    --mt-ref: #2b579a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: var(--mt-text);
+    line-height: 1.55;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 40px 20px 60px; }
+  header { text-align: center; margin-bottom: 8px; }
+  header img { width: 64px; height: 64px; }
+  h1 { color: var(--mt-accent); margin: 8px 0 4px; }
+  .tagline { color: var(--mt-muted); margin: 0 0 24px; text-align: center; }
+  a { color: var(--mt-ref); }
+  .download {
+    display: block;
+    width: fit-content;
+    margin: 28px auto 6px;
+    padding: 14px 36px;
+    background: var(--mt-accent);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 8px;
+  }
+  .download:hover { background: #1a5c38; }
+  .under-button { text-align: center; color: var(--mt-muted); font-size: 13px; margin-top: 0; }
+  ol.steps { padding-left: 22px; }
+  ol.steps > li { margin-bottom: 12px; }
+  .note {
+    background: var(--mt-accent-weak);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+  h2 { color: var(--mt-accent); font-size: 19px; margin-top: 36px; }
+  code {
+    background: var(--mt-accent-weak);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 13px;
+    word-break: break-all;
+  }
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--mt-line);
+    color: var(--mt-muted);
+    font-size: 13px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="assets/icon-64.png" alt="MacTrace icon">
+    <h1>MacTrace</h1>
+  </header>
+  <p class="tagline">Free, keyboard-driven formula tracing for Excel on Mac.</p>
+
+  <p>Ever inherited a spreadsheet and wondered <em>where does this number come
+  from?</em> MacTrace breaks any formula into a readable tree, shows the live
+  value and location of every cell it references, and lets you jump straight
+  to any of them — even on another sheet. It also shows every cell that
+  <em>depends</em> on your selection, so you can change things without breaking
+  the workbook. All from the keyboard.</p>
+
+  <a class="download" href="dist/MacTrace-Installer.pkg" download>Download for Mac</a>
+  <p class="under-button">Free &amp; open source · Excel for Mac 16.55 (late 2021) or newer · No Microsoft&nbsp;365 subscription needed</p>
+
+  <h2>How to install</h2>
+  <ol class="steps">
+    <li><strong>Download</strong> the installer with the button above, then open it
+      from your <strong>Downloads</strong> folder.</li>
+    <li><strong>If your Mac says it can't verify the developer</strong> (that's
+      normal — MacTrace is a free community project, not registered with Apple):
+      open <strong>System Settings&nbsp;→ Privacy&nbsp;&amp;&nbsp;Security</strong>, scroll down,
+      and click <strong>“Open Anyway”</strong> next to the MacTrace message, then confirm.
+      <div class="note">On older Macs (before macOS Sequoia): right-click the
+      downloaded file, choose <strong>Open</strong>, then <strong>Open</strong> again.</div></li>
+    <li><strong>Follow the installer</strong> — it takes a few seconds, needs no
+      password, and will close and reopen Excel for you (save your work first).
+      Then look on Excel's <strong>Home</strong> tab for the
+      <strong>Trace</strong> and <strong>Dependents</strong> buttons. Done!</li>
+  </ol>
+
+  <h2>Good to know</h2>
+  <p><strong>Private by design.</strong> MacTrace runs inside Excel on your Mac and
+  reads your formulas locally. Your spreadsheet data never leaves your computer —
+  the internet connection is only used to load the add-in itself.</p>
+  <p><strong>Always up to date.</strong> Improvements arrive automatically; there is
+  nothing to update or maintain.</p>
+  <p><strong>Easy to remove.</strong> Delete one file and restart Excel: in Finder
+  press <code>Cmd+Shift+G</code>, paste
+  <code>~/Library/Containers/com.microsoft.Excel/Data/Documents/wef</code>
+  and delete <code>MacTrace.hosted.manifest.xml</code>.</p>
+
+  <footer>
+    <p>MacTrace is free and open source —
+    <a href="https://github.com/HubertSzymanowski/MacTrace---Excel-add-in-for-MacOS">view the code on GitHub</a>.<br>
+    Developers and the terminal-inclined: see the
+    <a href="https://github.com/HubertSzymanowski/MacTrace---Excel-add-in-for-MacOS#advanced--for-developers">advanced install</a> in the README.</p>
+  </footer>
+</main>
+</body>
+</html>

@@ -21,20 +21,59 @@ Reopen it any time with **Cmd+Option+A** (or the **Trace** button).
 
 ---
 
-## What's included
+## Install (Excel for Mac) — the easy way
+
+**[→ Download MacTrace-Installer.pkg](https://hubertszymanowski.github.io/MacTrace---Excel-add-in-for-MacOS/dist/MacTrace-Installer.pkg)**
+— or visit the [MacTrace page](https://hubertszymanowski.github.io/MacTrace---Excel-add-in-for-MacOS/)
+for a friendly walkthrough.
+
+1. **Download** the installer and open it from your Downloads folder.
+2. **If macOS says it can't verify the developer** (normal for a free community
+   project): System Settings → **Privacy & Security** → scroll down → **Open
+   Anyway**. On macOS before Sequoia: right-click the file → **Open** → **Open**.
+3. **Follow the installer** — no password needed; it closes and reopens Excel
+   for you (save your work first). Then look on Excel's **Home** tab for the
+   **Trace** and **Dependents** buttons.
+
+That's it. No terminal, no Node.js, nothing running in the background: the
+installer puts a single manifest file into Excel's add-in folder, pointing at
+the add-in hosted on GitHub Pages. Your spreadsheet data never leaves your Mac
+(see [Design notes](#design-notes-why-its-simple-and-fast)); the connection is
+only used to load the add-in's own files.
+
+**Requirements:** Excel for Mac **version 16.55 (late 2021) or newer** — a
+**Microsoft 365 subscription is not required**, a perpetual licence on a
+current build works. (The ribbon buttons need the shared runtime, Excel for
+Mac 16.35+; the Cmd+Option+A shortcuts need 16.55+.) Internet access is needed
+when the pane opens.
+
+**Uninstall:** in Finder press `Cmd+Shift+G`, paste
+`~/Library/Containers/com.microsoft.Excel/Data/Documents/wef`, delete
+`MacTrace.hosted.manifest.xml`, restart Excel.
+
+---
+
+<details>
+<summary><h2>Advanced / for developers</h2></summary>
+
+### What's included
 
 ```
 MacTrace/
-├── manifest.xml            # the add-in manifest (validated)
+├── manifest.xml            # DEV manifest (localhost:3100, validated)
 ├── shortcuts.json          # custom keyboard shortcuts
 ├── package.json
 ├── server.js               # local HTTPS server for the add-in's files
+├── index.html              # installer landing page (served by GitHub Pages)
 ├── assets/                 # PNG icons
+├── dist/                   # GENERATED: hosted manifest + end-user installer
 ├── scripts/
 │   ├── make-icons.js       # regenerates the icons (no dependencies)
-│   ├── sideload.js         # installs/removes the add-in for Excel on Mac
+│   ├── sideload.js         # installs/removes the DEV add-in for Excel on Mac
 │   ├── install-autostart.sh / uninstall-autostart.sh   # run the server at login
-│   └── reset-sideload.sh   # clears Excel's add-in cache + re-installs
+│   ├── reset-sideload.sh   # clears Excel's add-in cache + re-installs
+│   ├── build-dist.js       # generates dist/MacTrace.manifest.xml (hosted URLs)
+│   └── build-installer.sh  # builds dist/MacTrace-Installer.pkg
 ├── src/
 │   ├── taskpane.html/.css/.js   # the pane UI + controller
 │   ├── formula-parser.js        # Excel formula tokenizer + parser
@@ -42,28 +81,25 @@ MacTrace/
 └── preview/                # optional browser mock to see the UI without Excel
 ```
 
----
+### Local dev install (localhost server)
 
-## Install (Excel for Mac)
-
-**Requirements:** Excel for Mac and **Node.js 18+**. A **Microsoft 365
-subscription is not required** — Office Add-ins run on perpetual Excel for Mac
-(2016 / 2019 / 2021) on a reasonably recent build. Sideloading is never
+**Requirements:** Excel for Mac and **Node.js 18+**. Sideloading is never
 subscription-gated.
 
 ```bash
 cd MacTrace
 npm install            # installs the dev-cert + manifest tooling
 npm run autostart      # runs the HTTPS server now + at every login (no more npm start)
-npm run sideload       # copies the manifest into Excel's add-in folder
+npm run sideload       # copies the DEV manifest into Excel's add-in folder
 ```
 
 Then **fully quit and reopen Excel**. On the **Home** tab you'll see a
 **MacTrace** group with **Trace** and **Dependents** buttons.
 
 > First run creates and trusts a `localhost` certificate (macOS may ask for your
-> password). If the pane is blank, visit `https://localhost:3100/src/taskpane.html`
-> once in Safari to accept the certificate.
+> password; it expires after ~30 days — rerun `npm run certs`). If the pane is
+> blank, visit `https://localhost:3100/src/taskpane.html` once in Safari to
+> accept the certificate.
 
 If a sideloaded add-in doesn't appear (Excel's add-in cache can go stale), run:
 
@@ -71,8 +107,46 @@ If a sideloaded add-in doesn't appear (Excel's add-in cache can go stale), run:
 bash scripts/reset-sideload.sh   # quits Excel, clears the cache, re-installs, reopens
 ```
 
-To remove MacTrace: `npm run unsideload` (and `npm run autostart:off`), then
-restart Excel.
+To remove the dev version: `npm run unsideload` (and `npm run autostart:off`),
+then restart Excel.
+
+The dev manifest and the hosted one have **different GUIDs and different
+filenames in `wef`** (`MacTrace.manifest.xml` vs `MacTrace.hosted.manifest.xml`),
+so both can be installed side by side (you'll see two MacTrace groups on the
+ribbon), and `npm run sideload` / `unsideload` never touches an end-user
+install.
+
+### The end-user distribution (how the easy install works)
+
+- The add-in's static files are served by **GitHub Pages** from this repo's
+  root (`https://hubertszymanowski.github.io/MacTrace---Excel-add-in-for-MacOS/`).
+- `npm run build:dist` regenerates `dist/`:
+  - `dist/MacTrace.manifest.xml` — the manifest with hosted URLs and its own
+    GUID (`scripts/build-dist.js`; validate with `npm run validate:dist`);
+  - `dist/MacTrace-Installer.pkg` — a tiny payload-free, **per-user** package
+    (no admin password). Its postinstall quits Excel, clears the add-in cache,
+    copies the manifest into `wef`, and reopens Excel
+    (`scripts/build-installer.sh`).
+- `dist/` is committed so Pages can serve the installer directly — **rerun
+  `npm run build:dist` and commit whenever `manifest.xml`, the version, or the
+  hosting URL changes.** Code-only changes (src/, assets/) need no rebuild:
+  users pick them up automatically from Pages.
+- Test the pkg without the GUI:
+  `installer -pkg dist/MacTrace-Installer.pkg -target CurrentUserHomeDirectory`
+  (this really installs it for your user; delete the manifest from `wef` to undo).
+
+**One-time repo setup (maintainer):** GitHub → Settings → Pages → Deploy from a
+branch → `main` / `(root)`. If you ever rename the repo or account, every
+installed user's manifest keeps the old URL — treat the Pages URL as permanent,
+update `PAGES_BASE` in `scripts/build-dist.js`, rebuild, and have users
+reinstall.
+
+> The installer is not signed/notarized (no paid Apple Developer ID), so users
+> get a one-time Gatekeeper stop — the landing page walks them through it. With
+> a Developer ID, add `--sign` to `productbuild` + notarize, and that prompt
+> disappears.
+
+</details>
 
 ---
 

@@ -11,7 +11,9 @@
     "unsideload": "node scripts/sideload.js --remove",
     "autostart": "bash scripts/install-autostart.sh",
     "autostart:off": "bash scripts/uninstall-autostart.sh",
-    "validate": "office-addin-manifest validate manifest.xml"
+    "validate": "office-addin-manifest validate manifest.xml",
+    "build:dist": "bash scripts/build-installer.sh",
+    "validate:dist": "office-addin-manifest validate dist/MacTrace.manifest.xml"
   },
   "devDependencies": {
     "office-addin-dev-certs": "^1.13.0",
