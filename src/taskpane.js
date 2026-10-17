@@ -175,15 +175,15 @@
     // as early as possible. The handler bows out while the formula editor is active.
     window.addEventListener("keydown", onKeyDown, true);
 
-    // Formula line: when NOT editing, click a coloured reference to teleport, or
-    // click elsewhere to start editing in place. While editing it's contentEditable
-    // (clicks position the caret); Enter commits, Esc cancels, blur commits.
+    // Formula line: a click anywhere, references included, edits the formula in
+    // place with the caret where you clicked. It deliberately does NOT jump to a
+    // clicked reference: that moved the grid and retraced the pane when you only
+    // meant to edit (drill from the tree instead: Enter or click a row). While
+    // editing it's contentEditable; Enter commits, Esc cancels, blur commits.
     var f = dom["mt-formula"];
     f.addEventListener("click", function (e) {
       if (editing) return;
-      var t = e.target;
-      if (t && t.classList.contains("tok-ref")) { teleport(t.dataset.nav); return; }
-      startEdit();
+      startEdit(formulaOffsetAt(e.clientX, e.clientY)); // read before the line is re-rendered
     });
     f.addEventListener("keydown", onFormulaEditKey);
     f.addEventListener("blur", function () { if (editing) finishEdit(true); });
@@ -309,22 +309,21 @@
       var span = elText("span", cls, tok.value);
       span.dataset.start = tok.pos;
       span.dataset.end = tok.pos + tok.value.length;
-      if (tok.type === "ref") span.dataset.nav = tok.value;
       box.appendChild(span);
     });
   }
 
   // ---- Editable formula bar -------------------------------------------------
   //
-  // The coloured formula line (display + inspect-highlight + click-to-teleport) is
-  // preserved; clicking elsewhere on it swaps in a <textarea> pre-filled with the
-  // raw formula. Enter (or blur) writes it back via X.setFormula → range.formulas;
-  // Esc cancels and drops to the grid.
+  // The coloured formula line (display + inspect-highlight) is preserved; a click
+  // anywhere on it turns it into an editable field holding the raw formula, with
+  // the caret where you clicked. Enter (or blur) writes it back via X.setFormula
+  // → range.formulas; Esc cancels.
 
   // Edit the formula IN PLACE: the same #mt-formula line becomes contentEditable
   // (no separate input box). We swap its coloured tokens for the plain raw formula
   // so editing is clean, then restore the coloured render when done.
-  function startEdit() {
+  function startEdit(caretAt) {
     if (!state.selection || editing || writing || state.busy) return; // let a pending write / re-render land
     editing = true;
     var box = dom["mt-formula"];
@@ -334,7 +333,31 @@
     box.spellcheck = false;
     box.classList.add("mt-formula--editing");
     box.focus();
-    placeCaretEnd(box);
+    if (caretAt == null) placeCaretEnd(box);
+    else placeCaretAt(box, caretAt);
+  }
+
+  // Where in the raw formula a click on the coloured line landed (index into the
+  // formula including its "="), or null if unknown. The coloured line drops
+  // whitespace, so this maps through each token's data-start (its offset after
+  // the "=") instead of counting the characters on screen.
+  function formulaOffsetAt(x, y) {
+    var box = dom["mt-formula"];
+    var node = null, off = 0;
+    try {
+      if (document.caretRangeFromPoint) {
+        var r = document.caretRangeFromPoint(x, y);
+        if (r) { node = r.startContainer; off = r.startOffset; }
+      } else if (document.caretPositionFromPoint) {
+        var p = document.caretPositionFromPoint(x, y);
+        if (p) { node = p.offsetNode; off = p.offset; }
+      }
+    } catch (e) { return null; }
+    if (!node || node.nodeType !== 3) return null; // padding / past the end
+    if (node === box.firstChild) return Math.min(off, 1); // the leading "="
+    var el = node.parentNode;
+    if (!el || el.parentNode !== box || el.dataset.start == null) return null;
+    return 1 + Number(el.dataset.start) + off;
   }
 
   function exitEditMode() {
@@ -397,6 +420,21 @@
       // editing) to close the pane.
     }
     // all other keys (typing, arrows, Backspace) edit the formula text
+  }
+
+  // Put the text caret at character `offset` of a contentEditable element that
+  // holds a single text node (clamped to its length).
+  function placeCaretAt(el, offset) {
+    var text = el.firstChild;
+    if (!text || text.nodeType !== 3) return placeCaretEnd(el);
+    try {
+      var range = document.createRange();
+      range.setStart(text, Math.max(0, Math.min(offset, text.length)));
+      range.collapse(true);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) { placeCaretEnd(el); }
   }
 
   // Put the text caret at the end of a contentEditable element.

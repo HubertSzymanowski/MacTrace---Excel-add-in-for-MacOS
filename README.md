@@ -186,12 +186,14 @@ the range's original fill (colour *and* pattern, so "No Fill" cells stay No Fill
 and restores it the moment you move to the next part, click away, hide or close
 the pane. The saved state is also mirrored to document settings, so a highlight
 is undone even if the pane closes unexpectedly (it's restored on next open).
-Press `Enter` (or click) to *commit* and make that cell the new thing you're
-auditing; click any blue reference in the formula line to jump straight to it.
+Press `Enter` (or click the row) to *commit* and make that cell the new thing
+you're auditing.
 
-**Edit a formula in place:** click anywhere on the formula line (other than a blue
-reference) to turn it into an editable field. Type your changes and press `Enter`
-(or click away) to write the new formula back to the cell; press `Esc` to cancel.
+**Edit a formula in place:** click anywhere on the formula line, references
+included, to turn it into an editable field with the cursor where you clicked
+(clicking a reference never moves you to its cell). Type your changes and press
+`Enter` (or click away) to write the new formula back to the cell; press `Esc` to
+cancel.
 If the cell was changed in the grid since you traced it, MacTrace won't overwrite
 it: it shows the cell's current formula instead, so you can redo the edit on it.
 

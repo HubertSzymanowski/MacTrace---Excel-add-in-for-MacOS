@@ -63,8 +63,8 @@ html, body {
   cursor: text;
   white-space: pre-wrap;
 }
-.mt-formula .tok-ref { color: var(--mt-ref); cursor: pointer; border-bottom: 1px dotted var(--mt-ref); }
-.mt-formula .tok-ref:hover { background: #dde7f5; }
+/* Plain coloured text, not a link: clicking a reference edits the formula. */
+.mt-formula .tok-ref { color: var(--mt-ref); }
 .mt-formula .tok-fn { color: var(--mt-fn); font-weight: 600; }
 .mt-formula .tok-num { color: var(--mt-num); }
 .mt-formula .tok-str { color: var(--mt-str); }
