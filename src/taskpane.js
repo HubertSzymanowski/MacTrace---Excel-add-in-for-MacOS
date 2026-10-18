@@ -178,7 +178,7 @@
     // Formula line: a click anywhere, references included, edits the formula in
     // place with the caret where you clicked. It deliberately does NOT jump to a
     // clicked reference: that moved the grid and retraced the pane when you only
-    // meant to edit (drill from the tree instead: Enter or click a row). While
+    // meant to edit (drill from the tree instead: Enter on a row). While
     // editing it's contentEditable; Enter commits, Esc cancels, blur commits.
     var f = dom["mt-formula"];
     f.addEventListener("click", function (e) {
@@ -225,7 +225,7 @@
   //   trace("active")               ribbon button / shortcut / first open: the
   //                                 active cell, read once any preview in flight
   //                                 has settled
-  //   trace({ address, selection }) drill (Enter, click) and Back: that cell
+  //   trace({ address, selection }) drill (Enter) and Back: that cell
   //   trace("current")              re-render the audited cell (tab switch, edit)
   var renderedMode = null; // the mode #mt-content was last rendered in
   function trace(req) {
@@ -649,12 +649,14 @@
     row.appendChild(valCol);
     row.appendChild(locCol);
 
-    if (info.nav) {
-      row.addEventListener("click", function (e) {
-        if (e.target === twisty) return;
-        teleport(info.nav);
-      });
-    }
+    // A click selects the row exactly like the arrow keys: the cursor moves
+    // there and a reference is previewed (scrolled to + highlighted) in the
+    // grid, but the audited cell does NOT change. Drilling in is Enter only.
+    row.addEventListener("click", function (e) {
+      if (e.target === twisty) return;
+      var i = focusableRows().indexOf(row);
+      if (i !== -1) setCursor(i);
+    });
     return { row: row, twisty: twisty };
   }
 

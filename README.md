@@ -171,7 +171,8 @@ and press **Cmd+Option+A** again, or drill into it from the tree.
 | Trace **dependents** of the active cell | **Cmd+Option+Shift+A**, or the **Dependents** button |
 | Move through the tree (live-preview the cell) | `↑` / `↓` |
 | Expand / collapse a node | `→` / `←` |
-| Commit / drill into the selected reference | `Enter`, or click the row |
+| Preview a row (same as the arrow keys) | click the row |
+| Commit / drill into the selected reference | `Enter` |
 | Step back one hop | `Backspace` |
 | Close the pane (returns control to the grid) | `Esc` |
 
@@ -191,7 +192,8 @@ the range's original fill (colour *and* pattern, so "No Fill" cells stay No Fill
 and restores it the moment you move to the next part, click away, hide or close
 the pane. The saved state is also mirrored to document settings, so a highlight
 is undone even if the pane closes unexpectedly (it's restored on next open).
-Press `Enter` (or click the row) to *commit* and make that cell the new thing
+Clicking a row previews it the same way and never changes what you're auditing.
+Press `Enter` to *commit* and make that cell the new thing
 you're auditing.
 
 **Edit a formula in place:** click anywhere on the formula line, references

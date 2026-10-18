@@ -13,7 +13,7 @@
   // Build tag — bumped on every change to this layer so the pane can show which
   // code is actually running (shared-runtime JS only reloads on a full Excel
   // restart, so a stale build is a real possibility to rule out).
-  var BUILD = "grid-v17";
+  var BUILD = "grid-v18";
 
   // ---- Capability detection -------------------------------------------------
 
