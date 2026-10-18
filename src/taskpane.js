@@ -56,7 +56,8 @@
     setupCommands(); // ribbon/keyboard handlers + visibility tracking
     // Recovery: undo any highlight left painted by a previous session that closed
     // or crashed before it could clean up (state survives in document settings).
-    X.clearTemporaryHighlight();
+    queueHL(function () { return X.clearTemporaryHighlight(); });
+    unmarkAudited();
     if (state.visible) { trace("active"); focusPane(); }
   });
 
@@ -77,19 +78,31 @@
           // (activateTrace) has already traced the active cell. Only an empty
           // pane, with nothing audited yet, traces once so it never opens blank.
           if (!state.selection && !state.busy) trace("active");
+          else markAudited(); // the audited cell gets its pink back
           focusPane();
-        } else clearInspect(); // pane hidden — drop the highlight
+        } else { clearInspect(); unmarkAudited(); } // pane hidden: drop both colours
       });
     }
 
     // Clean up the highlight if the pane is closed/unloaded or the document is
     // backgrounded. Best-effort (unload can't await async); document-settings
     // recovery on next load is the backstop for a hard close.
-    window.addEventListener("pagehide", function () { clearInspect(); });
-    window.addEventListener("beforeunload", function () { clearInspect(); });
+    window.addEventListener("pagehide", function () { clearInspect(); unmarkAudited(); });
+    window.addEventListener("beforeunload", function () { clearInspect(); unmarkAudited(); });
     document.addEventListener("visibilitychange", function () {
-      if (document.hidden) clearInspect();
+      if (document.hidden) { clearInspect(); unmarkAudited(); }
     });
+  }
+
+  // The audited cell stays painted #FE99FE (X.setAuditMark) while it is being
+  // audited, so you keep track of it while previewing its parts. The mark
+  // follows each trace and goes away with the pane, always on the grid queue.
+  function markAudited() {
+    var sel = state.selection;
+    if (sel) queueHL(function () { return X.setAuditMark(sel.address); });
+  }
+  function unmarkAudited() {
+    queueHL(function () { return X.clearAuditMark(); });
   }
 
   // Invoked by a ribbon command or keyboard shortcut: switch to the requested
@@ -248,6 +261,7 @@
         // history goes. (Drill and Back maintain navStack themselves.)
         if (req === "active" && !(prev && prev.address === sel.address)) state.navStack = [];
         state.selection = sel;
+        markAudited();
         renderedMode = state.mode;
         renderHeader(sel);
         return state.mode === "precedents" ? renderPrecedents(sel) : renderDependents(sel);
@@ -262,6 +276,7 @@
           return;
         }
         renderedMode = state.mode;
+        unmarkAudited();
         // The named cell can't be read (e.g. its sheet was renamed or deleted).
         // Clear the view rather than leave the old one under a newly active tab.
         var what = req === "current" ? prev.local : String(req.address).split("!").pop();
@@ -502,15 +517,21 @@
     info.depth = depth;
     if (node.pos != null) { info.fstart = node.pos; info.fend = node.end; }
     var built = makeRow(info);
-    container.appendChild(built.row);
+    // The row and its subtree share a .mt-node wrapper, which the CSS uses to
+    // draw the dotted hierarchy lines.
+    var wrap = elDiv("mt-node");
+    wrap.style.setProperty("--depth", depth);
+    container.appendChild(wrap);
+    wrap.appendChild(built.row);
 
     if (info.children && info.children.length) {
       var kids = elDiv("mt-children");
-      container.appendChild(kids);
+      wrap.appendChild(kids);
       wireTwisty(built, kids);
       info.children.forEach(function (ch) {
         renderNode(kids, ch.node, ch.role, depth + 1, refMap);
       });
+      if (info.collapsed) toggleCollapse(built.row, kids, built.twisty); // filters start folded
     }
   }
 
@@ -521,10 +542,26 @@
         return {
           element: node.name, role: role, value: "", location: "", nav: null,
           func: true, expandable: node.args.length > 0,
-          children: node.args.map(function (a, i) {
-            return { node: a, role: P.argLabel(node.name, i, node.args.length) };
-          })
+          children: funcChildren(node)
         };
+      case "filter": {
+        // A criteria_range + criteria pair, shown as one condition (Arixcel's
+        // "Filter"). Arrowing onto it previews the criteria range.
+        var fr = node.range.kind === "ref" ? (refMap[node.range.text] || {}) : {};
+        var fUnreachable = fr.kind === "external" || fr.kind === "missing" || fr.kind === "invalid";
+        var cond = filterCondition(node);
+        return {
+          element: "Filter" + (node.number ? " " + node.number : ""), role: cond,
+          value: "<filter>", valueClass: "v-filter", rowTitle: cond,
+          location: fr.address || "",
+          nav: node.range.kind === "ref" && !fUnreachable ? (fr.address || node.range.text) : null,
+          expandable: true, collapsed: true,
+          children: [
+            { node: node.range, role: "criteria_range" },
+            { node: node.criteria, role: "criteria" }
+          ]
+        };
+      }
       case "ref": {
         var rv = refMap[node.text] || {};
         // Navigable unless we KNOW the target is unreachable. We deliberately
@@ -535,7 +572,7 @@
         // themselves and report a clear reason if it really is unreachable.
         var unreachable = rv.kind === "external" || rv.kind === "missing" || rv.kind === "invalid";
         return {
-          element: node.text, role: role, value: rv.display || "",
+          element: node.text, role: role, value: rv.display || "", valueTitle: rv.size || "",
           valueClass: rv.kind === "cell" ? typeClass(rv.valueType) : "v-" + (rv.kind || ""),
           location: rv.address || "", nav: unreachable ? null : (rv.address || node.text),
           expandable: false, children: []
@@ -546,11 +583,17 @@
       case "binary":
       case "unary":
       case "group": {
-        var operands = P.collectOperands(node);
+        // Every part of the expression, constants and operators included (see
+        // P.expressionParts): e.g. the "/1000" of (A+B)/1000 is a row of its own.
+        var parts = P.expressionParts(node);
         return {
-          element: P.nodeToText(node), role: role, value: "", location: "", nav: null,
-          expandable: operands.length > 0,
-          children: operands.map(function (o) { return { node: o, role: "" }; })
+          element: P.nodeToText(node), role: role, location: "", nav: null,
+          // A range compared with a value (SUMPRODUCT's --(A:A=X)) is a filter:
+          // it yields TRUE/FALSE per row rather than a value of its own.
+          value: isFilterExpr(node, refMap) ? "<filter>" : "",
+          valueClass: "v-filter",
+          expandable: parts.length > 0,
+          children: parts
         };
       }
       case "number":
@@ -566,6 +609,70 @@
       default:
         return { element: node.text || "", role: role, value: "", expandable: false, children: [] };
     }
+  }
+
+  // ---- Filters (criteria pairs) ----------------------------------------------
+  //
+  // In the conditional aggregates every criteria_range + criteria pair is one
+  // condition, so it is shown as one "Filter" node (as Arixcel does) instead of
+  // two loose arguments. pairAt: the argument where the first pair starts;
+  // repeat: whether more pairs follow (the *IFS functions).
+  var FILTER_FUNCS = {
+    SUMIF: { pairAt: 0, repeat: false }, AVERAGEIF: { pairAt: 0, repeat: false },
+    COUNTIF: { pairAt: 0, repeat: false }, COUNTIFS: { pairAt: 0, repeat: true },
+    SUMIFS: { pairAt: 1, repeat: true }, AVERAGEIFS: { pairAt: 1, repeat: true },
+    MAXIFS: { pairAt: 1, repeat: true }, MINIFS: { pairAt: 1, repeat: true }
+  };
+
+  function funcChildren(node) {
+    var args = node.args;
+    var plain = function (a, i) { return { node: a, role: P.argLabel(node.name, i, args.length) }; };
+    var spec = FILTER_FUNCS[String(node.name).toUpperCase().replace(/^_XLFN\./, "")];
+    if (!spec) return args.map(plain);
+    var pairStarts = [];
+    for (var s = spec.pairAt; s + 1 < args.length; s += 2) {
+      pairStarts.push(s);
+      if (!spec.repeat) break;
+    }
+    var out = [];
+    for (var i = 0; i < args.length; i++) {
+      var k = pairStarts.indexOf(i);
+      if (k === -1) { out.push(plain(args[i], i)); continue; }
+      var range = args[i], crit = args[i + 1];
+      out.push({ node: {
+        kind: "filter", range: range, criteria: crit,
+        number: pairStarts.length > 1 ? k + 1 : 0,
+        pos: range.pos, end: crit.end != null ? crit.end : range.end
+      }, role: "" });
+      i++; // the criteria argument is inside the filter
+    }
+    return out;
+  }
+
+  // "DANE!$E:$E = "jabłko"", "B:B > 0" (criteria ">0"), "A:A = E$3".
+  var CRIT_OPS = { "<>": "≠", ">=": "≥", "<=": "≤", "=": "=", "<": "<", ">": ">" };
+  function filterCondition(f) {
+    var range = P.nodeToText(f.range);
+    var c = f.criteria;
+    if (c && c.kind === "string") {
+      var s = String(c.text).replace(/^"|"$/g, "").replace(/""/g, '"');
+      var m = /^(<>|>=|<=|=|<|>)(.*)$/.exec(s);
+      if (m) return range + " " + CRIT_OPS[m[1]] + " " + m[2];
+      return range + " = \"" + s + "\"";
+    }
+    return range + " = " + (c ? P.nodeToText(c) : "");
+  }
+
+  // A comparison with a multi-cell range on one side, possibly wrapped in
+  // --(…), +(…) or parentheses: SUMPRODUCT-style row filters.
+  var COMPARE_OPS = { "=": 1, "<>": 1, "<": 1, ">": 1, "<=": 1, ">=": 1 };
+  function isFilterExpr(n, refMap) {
+    while (n && (n.kind === "group" || (n.kind === "unary" && !n.postfix))) n = n.kind === "group" ? n.expr : n.operand;
+    if (!n || n.kind !== "binary" || !COMPARE_OPS[n.op]) return false;
+    var isRange = function (x) {
+      return x && x.kind === "ref" && ((refMap[x.text] || {}).kind === "range" || String(x.text).indexOf(":") !== -1);
+    };
+    return isRange(n.left) || isRange(n.right);
   }
 
   // ---- Dependents -----------------------------------------------------------
@@ -614,7 +721,10 @@
           element: item.local, role: "dependent", value: "", location: item.address,
           depth: 1, nav: item.address, expandable: false
         });
-        kids.appendChild(built.row);
+        var wrap = elDiv("mt-node");
+        wrap.style.setProperty("--depth", 1);
+        wrap.appendChild(built.row);
+        kids.appendChild(wrap);
       });
       setCursor(0, { silent: true }); // origin row
     });
@@ -625,6 +735,7 @@
   function makeRow(info) {
     var row = elDiv("mt-row");
     row.style.setProperty("--depth", info.depth || 0);
+    if (info.rowTitle) row.title = info.rowTitle;
     if (info.func) row.classList.add("mt-func");
     if (info.nav) {
       row.classList.add("mt-nav");
@@ -636,12 +747,13 @@
     }
 
     var elCol = elDiv("mt-el");
-    var twisty = elText("span", "mt-twisty" + (info.expandable ? " mt-open" : " mt-leaf"), "▸");
+    var twisty = elText("span", "mt-twisty" + (info.expandable ? " mt-open" : " mt-leaf"), "");
     elCol.appendChild(twisty);
     elCol.appendChild(elText("span", "mt-el-text", info.element || ""));
 
     var roleCol = elText("span", "mt-info", info.role || "");
     var valCol = elText("span", "mt-val " + (info.valueClass || ""), info.value != null ? info.value : "");
+    if (info.valueTitle) valCol.title = info.valueTitle; // e.g. a range's size behind "<array>"
     var locCol = elText("span", "mt-loc", info.location ? info.location : "");
 
     row.appendChild(elCol);
@@ -855,6 +967,7 @@
     setStatus("Closing MacTrace…");
     state.visible = false; // a late preview must not pull focus back into a closing pane
     clearInspect();
+    unmarkAudited();
     return Promise.resolve()
       .then(function () {
         var addin = Office.addin;

@@ -92,7 +92,7 @@
       // cell Excel has selected. Like real Excel, the pane's own preview and drill
       // move it (range.select()); that must never retrace the pane.
       window.MacTraceExcel = {
-        BUILD: "grid-v18",
+        BUILD: "grid-v23",
         CAPS: { dependents: function () { return true; } },
         _active: "Calcs!J510",
         _cells: {
@@ -140,6 +140,7 @@
         resolveRefs: function (refs, baseSheet) {
           var self = this, o = {};
           refs.forEach(function (r) {
+            if (r.indexOf(":") !== -1) { o[r] = { kind: "range", display: "<array>", size: "1048576 × 1 cells", address: (baseSheet || "Calcs") + "!" + r.replace(/\$/g, "") }; return; }
             o[r] = self._values[r] || { kind: "cell", display: "0", valueType: "Double", address: (baseSheet || "Calcs") + "!" + r.replace(/\$/g, "") };
           });
           return Promise.resolve(o);
@@ -174,6 +175,10 @@
           });
         },
         clearTemporaryHighlight: function () { this._highlighted = null; return Promise.resolve({ ok: true, cleared: true }); },
+        MARK_COLOR: "#FE99FE",
+        _mark: null, // the audited cell painted pink
+        setAuditMark: function (addr) { this._mark = this._norm(addr); return Promise.resolve({ ok: true }); },
+        clearAuditMark: function () { this._mark = null; return Promise.resolve({ ok: true, cleared: true }); },
         reconcileSelection: function () {
           this._lastActive = this._active; // your selection becomes the baseline
           if (!this._highlighted || this._highlighted === this._active) return Promise.resolve({ ok: true, cleared: false });

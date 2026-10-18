@@ -184,6 +184,19 @@ returns control to the worksheet and you can keep typing right away. Reopen with
 instantly. (While editing a formula in place, `Esc` only cancels that edit and
 leaves the pane open.)
 
+**Reading the tree:** every part of the formula gets a row, including constants
+and operators (`/1000` shows as `1000` with the role "÷ divide by"), with ⊞/⊟
+boxes and dotted lines showing the nesting. A multi-cell range reads as
+`<array>` (hover for its size). In SUMIFS, SUMIF, COUNTIF(S), AVERAGEIF(S),
+MAXIFS and MINIFS each criteria_range + criteria pair is one **Filter** node
+(`<filter>`) whose role reads like a condition, e.g. `DANE!$E:$E = "jabłko"`;
+expand it to see both parts. A range compared with a value, as in
+SUMPRODUCT's `--(A:A=B1)`, is marked `<filter>` too.
+
+**The audited cell stays pink (`#FE99FE`)** while you audit it, so you always
+see where you started; it moves when you drill in and its own fill comes back
+when the audit moves on or the pane closes.
+
 **Live preview + grid highlight:** as you move `↑`/`↓` over a referenced cell,
 MacTrace scrolls to it, **paints it `#27E7F5` in the grid**, and highlights the
 matching part of the formula at the top — without rebuilding the tree. The
@@ -206,7 +219,9 @@ it: it shows the cell's current formula instead, so you can redo the edit on it.
 
 > Note: highlighting physically changes the cell fill (the Excel JS API has no
 > overlay layer), so hovering will mark the workbook as modified even though the
-> original formatting is always restored.
+> original formatting is always restored. The pink marker stays for as long as
+> the pane is open: close the pane (`Esc`) before saving, or the pink fill is
+> saved with the file (MacTrace removes it the next time its pane opens).
 
 **Shortcuts & focus:** the shortcuts open the pane, switch to the right mode,
 retrace the active cell, and try to grab keyboard focus so arrows work

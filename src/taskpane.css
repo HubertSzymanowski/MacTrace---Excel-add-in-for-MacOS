@@ -104,6 +104,7 @@ html, body {
 .mt-content { flex: 1; overflow: auto; outline: none; }
 
 .mt-row {
+  position: relative; /* anchors the tree connector lines */
   padding: 3px 10px 3px 0;
   cursor: default;
   border-bottom: 1px solid #f4f4f4;
@@ -121,19 +122,54 @@ html, body {
 }
 .mt-row.mt-nav .mt-el-text { color: var(--mt-ref); }
 .mt-row.mt-func .mt-el-text { color: var(--mt-fn); font-weight: 600; }
+/* Expand/collapse box, Arixcel / classic-tree style: a 9px square with a minus
+   (expanded, .mt-open) or a plus (collapsed). Drawn in CSS so it stays crisp. */
 .mt-twisty {
-  display: inline-block; width: 12px; text-align: center;
-  color: var(--mt-muted); cursor: pointer; user-select: none;
-  transition: transform 0.1s ease;
+  position: relative; flex: 0 0 12px;
+  display: inline-block; width: 12px; height: 12px;
+  cursor: pointer; user-select: none;
 }
-.mt-twisty.mt-open { transform: rotate(90deg); }
-.mt-twisty.mt-leaf { visibility: hidden; }
+.mt-twisty::before {
+  content: ""; position: absolute; left: 1px; top: 1px;
+  width: 9px; height: 9px; box-sizing: border-box;
+  border: 1px solid #8a8a8a; border-radius: 1px;
+  background: linear-gradient(#444, #444) center / 5px 1px no-repeat, #fff;
+}
+.mt-twisty:not(.mt-open)::before {
+  background:
+    linear-gradient(#444, #444) center / 5px 1px no-repeat,
+    linear-gradient(#444, #444) center / 1px 5px no-repeat,
+    #fff;
+}
+.mt-twisty.mt-leaf { cursor: default; }
+.mt-twisty.mt-leaf::before { display: none; }
+
+/* Dotted connector lines showing the hierarchy. Each child row and its subtree
+   sit in a .mt-node; the vertical line runs at the parent's box centre
+   (depth * 14px - 1px, matching .mt-el's indent and the box above) and stops
+   at the last child's row, and each row gets a short horizontal stub. */
+.mt-node { position: relative; }
+.mt-node:not(:last-child)::before,
+.mt-node:last-child > .mt-row::before {
+  content: ""; position: absolute; top: 0;
+  left: calc(var(--depth, 1) * 14px - 1px);
+  border-left: 1px dotted #a3a3a3;
+}
+.mt-node:not(:last-child)::before { bottom: 0; }
+.mt-node:last-child > .mt-row::before { height: 50%; }
+.mt-node > .mt-row::after {
+  content: ""; position: absolute; top: 50%;
+  left: calc(var(--depth, 1) * 14px - 1px);
+  width: 10px; border-top: 1px dotted #a3a3a3;
+}
+.mt-node > .mt-row:has(.mt-twisty.mt-leaf)::after { width: 22px; }
 
 .mt-info { color: var(--mt-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mt-val { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mt-val.v-number { color: var(--mt-num); }
 .mt-val.v-string { color: var(--mt-str); }
 .mt-val.v-error  { color: #c0392b; font-weight: 600; }
+.mt-val.v-filter { color: var(--mt-muted); }
 .mt-val.v-external, .mt-val.v-missing, .mt-val.v-invalid { color: var(--mt-muted); font-style: italic; }
 .mt-loc { font-size: 11px; color: var(--mt-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

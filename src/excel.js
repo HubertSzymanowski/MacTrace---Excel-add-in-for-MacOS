@@ -13,7 +13,7 @@
   // Build tag — bumped on every change to this layer so the pane can show which
   // code is actually running (shared-runtime JS only reloads on a full Excel
   // restart, so a stale build is a real possibility to rule out).
-  var BUILD = "grid-v18";
+  var BUILD = "grid-v23";
 
   // ---- Capability detection -------------------------------------------------
 
@@ -246,7 +246,10 @@
               } else {
                 out[e.text] = {
                   kind: "range",
-                  display: e.range.rowCount + "×" + e.range.columnCount + " range",
+                  // Like Arixcel: a multi-cell range reads as <array>; its size
+                  // is kept for the tooltip.
+                  display: "<array>",
+                  size: e.range.rowCount + " × " + e.range.columnCount + " cells",
                   count: e.range.cellCount,
                   address: e.range.address
                 };
@@ -443,9 +446,100 @@
       });
     }).then(function () {
       persistHighlight();
+      // A restored multi-cell preview on the marked sheet may have covered the
+      // audited cell (and restored it to "no fill"): put its pink back.
+      if (mark && rec.sheet === mark.sheet && String(rec.address).indexOf(":") !== -1) return reassertAuditMark();
+    }).then(function () {
       return { ok: true, cleared: true };
     }).catch(function (e) {
       persistHighlight();
+      return { ok: false, reason: "error", message: e.message };
+    });
+  }
+
+  // ---- Audited-cell marker -------------------------------------------------
+  //
+  // The cell being audited stays painted #FE99FE for as long as it is audited,
+  // so you keep track of it while previewing its parts (#27E7F5). Same
+  // reversible scheme as the preview: its original fill is saved first, in
+  // memory and in document settings, and restored when the audit moves on or
+  // the pane closes (or on the next load, after a crash).
+
+  var MARK_COLOR = "#FE99FE";
+  var MARK_KEY = "MacTrace.auditMark"; // settings key for crash/close recovery
+  var mark = null; // { sheet, address, color }
+
+  function persistMark() {
+    try {
+      var settings = Office.context.document.settings;
+      if (mark) settings.set(MARK_KEY, mark);
+      else settings.remove(MARK_KEY);
+      settings.saveAsync(function () {});
+    } catch (e) {/* settings unavailable — non-fatal */}
+  }
+
+  // Mark the audited cell (a sheet-qualified cell address). Marking the cell
+  // that is already marked just re-applies the colour.
+  function setAuditMark(cellRef) {
+    var p = splitRef(cellRef);
+    if (p.external) return clearAuditMark();
+    return resolveRange(p, stripDollars(p.body)).then(function (r) {
+      if (!r.ok) return clearAuditMark().then(function () { return r; });
+      if (mark && mark.sheet === r.sheet && mark.address === r.address) return reassertAuditMark();
+      return clearAuditMark().then(function () {
+        return readFill(r.sheet, r.address);
+      }).then(function (original) {
+        return Excel.run(function (ctx) {
+          ctx.workbook.worksheets.getItem(r.sheet).getRange(r.address).format.fill.color = MARK_COLOR;
+          return ctx.sync();
+        }).then(function () {
+          mark = { sheet: r.sheet, address: r.address, color: original };
+          persistMark();
+          return { ok: true };
+        });
+      });
+    }).catch(function (e) {
+      return { ok: false, reason: "error", message: e && e.message ? e.message : String(e) };
+    });
+  }
+
+  function reassertAuditMark() {
+    var rec = mark;
+    if (!rec) return Promise.resolve({ ok: true });
+    return Excel.run(function (ctx) {
+      var ws = ctx.workbook.worksheets.getItemOrNullObject(rec.sheet);
+      ws.load("isNullObject");
+      return ctx.sync().then(function () {
+        if (!ws.isNullObject) ws.getRange(rec.address).format.fill.color = MARK_COLOR;
+        return ctx.sync();
+      });
+    }).then(function () { return { ok: true }; }, function () { return { ok: false }; });
+  }
+
+  // Restore the audited cell's own fill (from memory, or from settings when a
+  // fresh runtime recovers a mark left by a crash), then forget it.
+  function clearAuditMark() {
+    var rec = mark;
+    if (!rec) {
+      try { rec = Office.context.document.settings.get(MARK_KEY); } catch (e) { rec = null; }
+    }
+    mark = null;
+    if (!rec) {
+      persistMark();
+      return Promise.resolve({ ok: true, cleared: false });
+    }
+    return Excel.run(function (ctx) {
+      var ws = ctx.workbook.worksheets.getItemOrNullObject(rec.sheet);
+      ws.load("isNullObject");
+      return ctx.sync().then(function () {
+        if (!ws.isNullObject) restoreFill(ws.getRange(rec.address), rec.color);
+        return ctx.sync();
+      });
+    }).then(function () {
+      persistMark();
+      return { ok: true, cleared: true };
+    }).catch(function (e) {
+      persistMark();
       return { ok: false, reason: "error", message: e.message };
     });
   }
@@ -668,6 +762,9 @@
     applyTemporaryHighlight: applyTemporaryHighlight,
     clearTemporaryHighlight: clearTemporaryHighlight,
     reconcileSelection: reconcileSelection,
+    MARK_COLOR: MARK_COLOR,
+    setAuditMark: setAuditMark,
+    clearAuditMark: clearAuditMark,
     setFormula: setFormula
   };
 })(window);

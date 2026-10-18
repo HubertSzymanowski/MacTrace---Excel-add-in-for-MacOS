@@ -328,6 +328,61 @@
     return out;
   }
 
+  // Operator → the role label shown on the operand it applies to.
+  var OP_ROLE = {
+    "+": "+ add", "-": "− subtract", "*": "× multiply", "/": "÷ divide by",
+    "^": "^ power", "&": "& join", "=": "= equals", "<>": "≠ not equal",
+    "<": "< less than", ">": "> greater than", "<=": "≤ at most", ">=": "≥ at least",
+    ":": ": range to"
+  };
+  // Operators of the same level chain into one list (a-b+c); a different
+  // level, or a parenthesis, becomes its own nested row.
+  var OP_LEVEL = {
+    "+": 1, "-": 1, "*": 2, "/": 2, "^": 3, "&": 4,
+    "=": 5, "<>": 5, "<": 5, ">": 5, "<=": 5, ">=": 5, ":": 6
+  };
+
+  // The parts of an operator expression, in formula order, each labelled with
+  // the operator applied to it: (A+B)/1000 -> [ (A+B) "", 1000 "÷ divide by" ].
+  // Unlike collectOperands, it keeps constants (numbers, text, TRUE, #N/A) and
+  // shows the operators and nesting, so nothing in the formula disappears from
+  // the tree.
+  function expressionParts(node) {
+    if (!node) return [];
+    if (node.kind === "group") {
+      var inner = node.expr;
+      if (!inner) return [];
+      return inner.kind === "binary" || inner.kind === "unary" || inner.kind === "group"
+        ? expressionParts(inner)
+        : [{ node: inner, role: "" }];
+    }
+    if (node.kind === "unary") {
+      // --X (TRUE/FALSE -> 1/0) is one step, not two negations: show what is
+      // being converted directly, e.g. the comparison inside --(A:A=B1).
+      if (!node.postfix && node.op === "-" && node.operand && node.operand.kind === "unary" &&
+          !node.operand.postfix && node.operand.op === "-" && node.operand.operand) {
+        var conv = node.operand.operand;
+        return conv.kind === "binary" || conv.kind === "unary" || conv.kind === "group"
+          ? expressionParts(conv)
+          : [{ node: conv, role: "-- to 1/0" }];
+      }
+      var r = node.postfix ? "% percent" : node.op === "-" ? "− negate" : node.op;
+      return node.operand ? [{ node: node.operand, role: r }] : [];
+    }
+    if (node.kind === "binary") {
+      var level = OP_LEVEL[node.op];
+      var parts = [];
+      var cur = node;
+      while (cur && cur.kind === "binary" && OP_LEVEL[cur.op] === level) {
+        parts.unshift({ node: cur.right, role: OP_ROLE[cur.op] || cur.op });
+        cur = cur.left;
+      }
+      parts.unshift({ node: cur, role: "" });
+      return parts.filter(function (p) { return p.node; });
+    }
+    return [];
+  }
+
   function childrenOf(node) {
     switch (node.kind) {
       case "func":
@@ -423,6 +478,7 @@
     parse: parse,
     collectRefs: collectRefs,
     collectOperands: collectOperands,
+    expressionParts: expressionParts,
     childrenOf: childrenOf,
     nodeToText: nodeToText,
     argLabel: argLabel
