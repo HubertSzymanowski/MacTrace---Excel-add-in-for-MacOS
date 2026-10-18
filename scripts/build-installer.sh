@@ -5,9 +5,9 @@
 #   bash scripts/build-installer.sh      (or: npm run build:dist)
 #
 # The .pkg is a tiny, payload-free, PER-USER package (no admin password):
-# its postinstall script quits Excel, clears the add-in cache, copies the
-# HOSTED manifest (dist/MacTrace.manifest.xml) into Excel's wef folder and
-# reopens Excel. Everything the manual install does, in one double-click.
+# its postinstall script quits Excel, copies the HOSTED manifest
+# (dist/MacTrace.manifest.xml) into Excel's wef folder and reopens Excel.
+# Everything the manual install does, in one double-click.
 #
 # The built .pkg is committed so GitHub Pages can serve it from the landing
 # page (index.html) without a separate release pipeline.
@@ -37,7 +37,6 @@ mkdir -p "$WORK/scripts" "$WORK/resources"
 set -u
 
 WEF="$HOME/Library/Containers/com.microsoft.Excel/Data/Documents/wef"
-CACHE="$HOME/Library/Containers/com.microsoft.Excel/Data/Library/Application Support/Microsoft/Office/16.0/Wef"
 SKIP_EXCEL="${MACTRACE_SKIP_EXCEL:-0}"
 
 # 1) Ask Excel to quit so it re-scans add-ins on next launch. If the user is
@@ -51,11 +50,13 @@ if [ "$SKIP_EXCEL" != "1" ]; then
   done
 fi
 
-# 2) Clear the add-in aggregation cache (Excel rebuilds it; a stale cache is
-#    the most common reason a sideloaded add-in doesn't show up).
-rm -rf "$CACHE/AggregatedCache" "$CACHE/AppCommands" "$CACHE/Resources" "$CACHE/icons" 2>/dev/null || true
+# Deliberately NO add-in cache clearing here. Wiping Excel's Wef cache
+# (AggregatedCache etc.) also wipes its keyboard-shortcut map and the state of
+# every other add-in the user has, and Excel for Mac then doesn't load
+# sideloaded add-ins until Insert > Add-ins > My Add-ins is opened. The
+# closing screen tells the user about that menu instead.
 
-# 3) Register the add-in: one manifest file in Excel's wef folder. The
+# 2) Register the add-in: one manifest file in Excel's wef folder. The
 #    filename is deliberately DIFFERENT from the dev sideload's
 #    MacTrace.manifest.xml (scripts/sideload.js) so the hosted and dev
 #    versions can coexist and neither flow clobbers the other.
@@ -66,7 +67,7 @@ HEADER
   cat <<'FOOTER'
 MANIFEST_EOF
 
-# 4) Reopen Excel (no-op if Excel isn't installed yet).
+# 3) Reopen Excel (no-op if Excel isn't installed yet).
 if [ "$SKIP_EXCEL" != "1" ]; then
   open -a "Microsoft Excel" >/dev/null 2>&1 || true
 fi
@@ -89,7 +90,6 @@ password is needed.</p>
 <p>The installer will:</p>
 <ul>
   <li>register the MacTrace add-in with Excel,</li>
-  <li>clear Excel&rsquo;s add-in cache so the buttons appear,</li>
   <li><b>close and reopen Excel</b> &mdash; save your work before you continue!</li>
 </ul>
 <p>Nothing else is installed and nothing runs in the background. MacTrace reads
@@ -108,6 +108,8 @@ cat > "$WORK/resources/conclusion.html" <<'EOF'
 <p>Open Excel and look on the <b>Formulas</b> tab for the <b>MacTrace</b> buttons
 (<b>Trace</b> and <b>Dependents</b>), or just press <b>Cmd+Option+A</b>.</p>
 <p>If Excel was already open, quit it fully (<code>Cmd+Q</code>) and open it again.</p>
+<p><b>MacTrace not showing, or Cmd+Option+A does nothing?</b> In Excel, choose
+<b>Insert &rarr; Add-ins &rarr; My Add-ins&hellip;</b>. That loads MacTrace.</p>
 <p>You need an internet connection when the MacTrace pane opens.</p>
 <p style="color:#6b6b6b">To uninstall: delete <code>MacTrace.hosted.manifest.xml</code> from
 <code>~/Library/Containers/com.microsoft.Excel/Data/Documents/wef</code> and restart Excel.</p>

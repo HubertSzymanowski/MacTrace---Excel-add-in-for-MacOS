@@ -34,6 +34,8 @@ for a friendly walkthrough.
 3. **Follow the installer** — no password needed; it closes and reopens Excel
    for you (save your work first). Then look on Excel's **Formulas** tab for the
    **Trace** and **Dependents** buttons, or just press **Cmd+Option+A**.
+   MacTrace not showing, or the shortcut does nothing? In Excel choose
+   **Insert → Add-ins → My Add-ins…**; that loads it.
 
 That's it. No terminal, no Node.js, nothing running in the background: the
 installer puts a single manifest file into Excel's add-in folder, pointing at
@@ -127,9 +129,12 @@ install.
   - `dist/MacTrace.manifest.xml` — the manifest with hosted URLs and its own
     GUID (`scripts/build-dist.js`; validate with `npm run validate:dist`);
   - `dist/MacTrace-Installer.pkg` — a tiny payload-free, **per-user** package
-    (no admin password). Its postinstall quits Excel, clears the add-in cache,
-    copies the manifest into `wef`, and reopens Excel
-    (`scripts/build-installer.sh`).
+    (no admin password). Its postinstall quits Excel, copies the manifest into
+    `wef`, and reopens Excel (`scripts/build-installer.sh`). It deliberately
+    does **not** clear Excel's add-in cache: that also wipes Excel's
+    keyboard-shortcut map and other add-ins' state, after which Excel for Mac
+    doesn't load sideloaded add-ins until **Insert → Add-ins → My Add-ins** is
+    opened.
 - `dist/` is committed so Pages can serve the installer directly — **rerun
   `npm run build:dist` and commit whenever `manifest.xml`, the version, or the
   hosting URL changes.** Code-only changes (src/, assets/) need no rebuild:
